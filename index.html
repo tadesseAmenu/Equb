@@ -110,7 +110,11 @@
       <h1>Members</h1>
       <div id="member-list" class="scroll-list"></div>
       <p id="no-members" class="empty-state">No members yet</p>
-      <button class="glass-button" onclick="showModal('invite')">Invite</button>
+      
+      <div class="action-buttons" style="margin-top:15px; gap:10px;">
+        <button class="glass-button" onclick="showModal('add-member')">Add Member</button>
+        <button class="glass-button secondary" onclick="showModal('invite')">Invite</button>
+      </div>
     </section>
 
     <!-- Activity -->
@@ -258,6 +262,17 @@
         <div class="button-group">
           <button class="glass-button" onclick="contribute()">Submit</button>
           <button class="glass-button secondary" onclick="closeModal('contribute')">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="add-member-modal">
+      <div class="modal-content">
+        <h2>Add Member</h2>
+        <input id="add-member-name" placeholder="Member Name" class="form-field" />
+        <div class="button-group">
+          <button class="glass-button" onclick="addMember()">Add</button>
+          <button class="glass-button secondary" onclick="closeModal('add-member')">Cancel</button>
         </div>
       </div>
     </div>
