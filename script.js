@@ -372,6 +372,43 @@ function shuffleArray(arr) {
   return a;
 }
 
+function addMember() {
+  const nameInput = el('add-member-name');
+  const name = nameInput.value.trim();
+  if (!name) return alert('Please enter a name');
+
+  const equb = getCurrentEqub();
+  if (!equb) return alert('Select an Equb first');
+  if (equb.status === 'completed') return alert('Equb is completed');
+  if (equb.members.length >= equb.targetMembers) return alert('Equb is full');
+  if (equb.members.some(m => m.name.toLowerCase() === name.toLowerCase())) {
+    return alert('Member already exists');
+  }
+
+  const memberId = generateId();
+  const newMember = {
+    id: memberId,
+    name: name,
+    joinedAt: new Date().toISOString()
+  };
+
+  equb.members.push(newMember);
+
+  // Auto-activate if full
+  if (equb.members.length === equb.targetMembers && equb.status === 'forming') {
+    equb.status = 'active';
+    equb.payoutOrder = shuffleArray(equb.members.map(m => ({ ...m })));
+  }
+
+  pushActivity(`${name} was added to the Equb`, equb.id);
+  saveState();
+  closeModal('add-member');
+  nameInput.value = '';
+  success(`${name} added!`);
+  updateMembers();
+  updateHome();
+}
+
 // ---------- Contribution ----------
 function populateContributionMembers() {
   const select = el('contribution-member');
