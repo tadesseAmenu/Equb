@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Equb App</title>
+
+  <!-- Load Custom Fonts: OTF + TTF -->
+  <style>
+    @font-face {
+      font-family: 'Benaiaha';
+      src: url('Benaiah.ttf') format('truetype'),
+           url('Benaiah.otf') format('opentype');
+      font-weight: normal;
+      font-style: normal;
+      font-display: swap;
+    }
+  </style>
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="background">
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
+   <!-- Welcome Page -->
+<section id="welcome-page" class="page">
+  <div class="glass-card center-card">
+    <!-- YOUR LOGO HERE -->
+    <img src="logo.png" alt="Equb Logo" class="welcome-logo" />
+    
+    <h1 id="welcome-title">Equb</h1>
+    <p id="welcome-sub">Community Savings, Together.</p>
+    <button class="glass-button" onclick="showPage('profile')">Get Started</button>
+  </div>
+</section>
+
+    <!-- Home Page -->
+    <section id="home-page" class="page" style="display:none;">
+      <div class="glass-card">
+        <h1 id="equb-name">Select an Equb</h1>
+        <p>Goal: <span id="home-goal-amount">0</span> ETB</p>
+        <p>Members: <span id="members-count">0</span>/<span id="home-target-members">0</span></p>
+        <p>Contribution: <span id="home-contribution-amount">0</span> ETB each</p>
+
+        <!-- Circular Progress -->
+        <div class="progress-container">
+          <svg class="progress-ring" viewBox="0 0 200 200">
+            <defs>
+              <linearGradient id="progress-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%"   stop-color="#f97316"/>
+                <stop offset="50%"  stop-color="#0f766e"/>
+                <stop offset="100%" stop-color="#06b6d4"/>
+              </linearGradient>
+            </defs>
+            <circle class="progress-bg" cx="100" cy="100" r="90"/>
+            <circle class="progress-fg" cx="100" cy="100" r="90"/>
+          </svg>
+          <div class="progress-text">
+            <div class="progress-percent" id="progress-percent">0%</div>
+            <div class="progress-complete">of goal reached</div>
+          </div>
+          <div class="progress-remaining" id="progress-remaining">0 ETB left</div>
+        </div>
+
+        <p>Status: <span id="status">Forming</span></p>
+        <p>Round: <span id="current-round">1</span> of <span id="total-rounds">0</span></p>
+      </div>
+
+      <!-- Daily Payments -->
+      <div id="daily-payments" class="info-section" style="display:none;">
+        <div class="glass-card">
+          <h2>Today's Payments (<span id="current-date"></span>)</h2>
+          <div id="payments-list"></div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="action-buttons">
+        <button class="gradient-button" onclick="showModal('contribute')">
+          <span class="button-icon">Contribution</span>
+        </button>
+        <button class="gradient-button" onclick="showPage('members')">
+          <span class="button-icon">Members</span>
+        </button>
+        <button class="gradient-button" onclick="showModal('create-equb')">
+          <span class="button-icon">New Equb</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- My Equbs -->
+    <section id="myequbs-page" class="page" style="display:none;">
+      <h1>My Equbs</h1>
+      <div id="equb-list" class="scroll-list"></div>
+      <p id="no-equbs" class="empty-state">No Equbs yet — create or join one</p>
+
+      <div class="glass-card">
+        <h2>Explore</h2>
+        <div class="button-group">
+          <button class="glass-button" onclick="showModal('create-equb')">Create Equb</button>
+          <button class="glass-button" onclick="showModal('join-equb')">Join Equb</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Members -->
+    <section id="members-page" class="page" style="display:none;">
+      <h1>Members</h1>
+      <div id="member-list" class="scroll-list"></div>
+      <p id="no-members" class="empty-state">No members yet</p>
+      <button class="glass-button" onclick="showModal('invite')">Invite</button>
+    </section>
+
+    <!-- Activity -->
+    <section id="activity-page" class="page" style="display:none;">
+      <h1>Activity Feed</h1>
+      <div id="activity-feed"></div>
+      <p id="no-activity" class="empty-state">No activity yet</p>
+    </section>
+
+    <!-- Profile -->
+    <section id="profile-page" class="page" style="display:none;">
+      <!-- Login / Signup -->
+      <div id="auth-card" class="glass-card">
+        <h1 id="auth-title">Login</h1>
+        <input id="auth-name" placeholder="Name (Signup only)" class="form-field" style="display:none;" />
+        <input id="auth-email" placeholder="Email or Phone" class="form-field" />
+        <input id="auth-password" placeholder="Password" type="password" class="form-field" />
+        <input id="auth-confirm" placeholder="Confirm Password" type="password" class="form-field" style="display:none;" />
+        <button class="glass-button" onclick="authAction()">Submit</button>
+        <button class="glass-button secondary" onclick="toggleAuthMode()">Switch to <span id="auth-switch">Signup</span></button>
+      </div>
+
+      <!-- Logged In View -->
+      <div id="profile-card" class="glass-card hidden">
+        <div style="text-align:center;">
+          <div id="profile-pic-container" style="width:100px;height:100px;margin:0 auto 15px;border-radius:50%;overflow:hidden;background:#ccc;">
+            <img id="profile-pic" src="" alt="Profile" style="width:100%;height:100%;object-fit:cover;display:none;" />
+            <div id="profile-pic-placeholder" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:2em;">
+              ?
+            </div>
+          </div>
+          <label class="glass-button small" style="cursor:pointer;">
+            Upload Photo
+            <input type="file" id="upload-pic" accept="image/*" style="display:none;" onchange="uploadProfilePic(event)" />
+          </label>
+        </div>
+        <h1 id="profile-name"></h1>
+        <p>Member since <span id="member-since"></span></p>
+      </div>
+
+      <div id="history-card" class="glass-card hidden">
+        <h2>History</h2>
+        <div id="history-list"></div>
+        <p id="no-history" class="empty-state">No history yet</p>
+      </div>
+
+      <div id="settings-card" class="glass-card hidden">
+        <h2>Settings</h2>
+        <label>Language:
+          <select id="language" onchange="setLanguage(this.value)">
+            <option value="en">English</option>
+            <option value="am">Amharic</option>
+            <option value="ti">Tigrinya</option>
+          </select>
+        </label>
+        <label>PIN/Biometrics:
+          <label class="toggle-switch">
+            <input type="checkbox" onchange="setSecurity(this.checked)" />
+            <span class="slider"></span>
+          </label>
+        </label>
+
+        <!-- EXPORT / IMPORT -->
+        <div style="margin-top:20px;">
+          <button class="glass-button small" onclick="exportCurrentEqub()">Export Current Equb</button>
+          <label class="glass-button small" style="display:inline-block; margin-left:10px; cursor:pointer;">
+            Import Equb <input type="file" id="import-file" accept=".json" style="display:none;" onchange="importEqub(event)" />
+          </label>
+        </div>
+      </div>
+
+      <button id="logout-button" class="glass-button hidden" onclick="logout()">Logout</button>
+    </section>
+
+    <!-- Modals -->
+    <div class="modal" id="create-equb-modal">
+      <div class="modal-content">
+        <h2>Create Equb</h2>
+        <input id="create-equb-name" placeholder="Equb Name" class="form-field" />
+        <select id="create-equb-frequency" class="form-field">
+          <option value="">Frequency</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
+        <input id="create-target-members" placeholder="Target Members" type="number" min="2" class="form-field" oninput="calculateContribution()" />
+        <input id="create-goal-amount" placeholder="Goal Amount (ETB)" type="number" min="1" class="form-field" oninput="calculateContribution()" />
+        <input id="create-contribution-amount" placeholder="Contribution (editable)" type="number" min="0.01" step="0.01" class="form-field" />
+        <input id="create-start-date" type="date" class="form-field" />
+        <div class="button-group">
+          <button class="glass-button" onclick="createEqub()">Create</button>
+          <button class="glass-button secondary" onclick="closeModal('create-equb')">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="edit-equb-modal">
+      <div class="modal-content">
+        <h2>Edit Equb</h2>
+        <input id="edit-equb-name" placeholder="Equb Name" class="form-field" />
+        <select id="edit-equb-frequency" class="form-field">
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
+        <input id="edit-target-members" placeholder="Target Members" type="number" min="2" class="form-field" oninput="calculateContribution()" />
+        <input id="edit-goal-amount" placeholder="Goal Amount (ETB)" type="number" min="1" class="form-field" oninput="calculateContribution()" />
+        <input id="edit-contribution-amount" placeholder="Contribution (editable)" type="number" min="0.01" step="0.01" class="form-field" />
+        <input id="edit-start-date" type="date" class="form-field" />
+        <div class="button-group">
+          <button class="glass-button" onclick="saveEditEqub()">Save</button>
+          <button class="glass-button secondary" onclick="closeModal('edit-equb')">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="join-equb-modal">
+      <div class="modal-content">
+        <h2>Join Equb</h2>
+        <input id="equb-code" placeholder="Enter Code (EQ-XXXX-2025)" class="form-field" />
+        <div class="button-group">
+          <button class="glass-button" onclick="joinEqub()">Join</button>
+          <button class="glass-button secondary" onclick="closeModal('join-equb')">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="invite-modal">
+      <div class="modal-content">
+        <h2>Invite to Equb</h2>
+        <p>Share this code:</p>
+        <div id="invite-code" style="font-weight:600; font-size:1.2em; margin:10px 0;"></div>
+        <div class="button-group">
+          <button class="glass-button" onclick="copyInviteCode()">Copy Code</button>
+          <button class="glass-button secondary" onclick="closeModal('invite')">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="contribute-modal">
+      <div class="modal-content">
+        <h2>Contribute</h2>
+        <select id="contribution-member" class="form-field"></select>
+        <input id="contribute-amount" placeholder="Amount (ETB)" type="number" min="0.01" step="0.01" class="form-field" />
+        <div class="button-group">
+          <button class="glass-button" onclick="contribute()">Submit</button>
+          <button class="glass-button secondary" onclick="closeModal('contribute')">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Nav Bar -->
+    <nav class="nav-bar" id="nav-bar" style="display:none;">
+      <a class="nav-item" data-page="home" onclick="showPage('home')">Home</a>
+      <a class="nav-item" data-page="myequbs" onclick="showPage('myequbs')">Equbs</a>
+      <a class="nav-item" data-page="members" onclick="showPage('members')">Members</a>
+      <a class="nav-item" data-page="activity" onclick="showPage('activity')">Activity</a>
+      <a class="nav-item" data-page="profile" onclick="showPage('profile')">Profile</a>
+    </nav>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
