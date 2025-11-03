@@ -1,4 +1,4 @@
-// script.js – Equb App v8.0 (Complete & Polished Edition)
+// script.js – Equb App v8.3 (COMPLETELY FIXED EDITION)
 
 /* ---------------------------------------------------------------------
    Utility & Safe DOM helpers
@@ -58,6 +58,7 @@ function formatCurrency(amount) {
 let state = loadState();
 let authMode = 'login';
 let draggedItem = null;
+let confirmationCallback = null;
 
 function getDefaultState() {
   return { 
@@ -148,7 +149,7 @@ function saveState() {
     backupState();
   } catch (err) {
     console.error('Save failed:', err);
-    alert('Failed to save data. Storage might be full.');
+    showToast('Failed to save data. Storage might be full.', 'error');
   }
 }
 
@@ -193,7 +194,7 @@ function registerUser(name, email, password) {
     passwordHash,
     salt,
     createdAt: new Date().toISOString(),
-    language: 'am',
+    language: 'en',
     profilePic: null,
     theme: 'light'
   };
@@ -234,6 +235,130 @@ function alert(message) {
 
 function success(message) { 
   showToast(message, 'success'); 
+}
+
+/* ---------------------------------------------------------------------
+   Confirmation Dialog System
+   --------------------------------------------------------------------- */
+function showConfirmation(action, data = null) {
+  const dialog = el('confirmation-dialog');
+  const title = el('confirmation-title');
+  const message = el('confirmation-message');
+  const yesBtn = el('confirmation-yes');
+  const noBtn = el('confirmation-no');
+  
+  if (!dialog || !title || !message || !yesBtn || !noBtn) return;
+  
+  // Set confirmation content based on action
+  switch(action) {
+    case 'logout':
+      title.textContent = getText('confirm');
+      message.textContent = getText('logoutConfirm');
+      break;
+    case 'deleteEqub':
+      title.textContent = getText('confirm');
+      message.textContent = getText('deleteConfirm');
+      break;
+    case 'removeMember':
+      title.textContent = getText('confirm');
+      message.textContent = getText('removeMemberConfirm');
+      break;
+    default:
+      title.textContent = getText('confirm');
+      message.textContent = getText('confirmAction');
+  }
+  
+  // Set up confirmation callback
+  confirmationCallback = (confirmed) => {
+    if (confirmed) {
+      switch(action) {
+        case 'logout':
+          performLogout();
+          break;
+        case 'deleteEqub':
+          performDeleteEqub(data);
+          break;
+        case 'removeMember':
+          performRemoveMember(data);
+          break;
+      }
+    }
+    hideConfirmation();
+  };
+  
+  // Show dialog
+  dialog.classList.remove('hidden');
+  
+  // Set up button handlers
+  yesBtn.onclick = () => confirmationCallback(true);
+  noBtn.onclick = () => confirmationCallback(false);
+}
+
+function hideConfirmation() {
+  const dialog = el('confirmation-dialog');
+  if (dialog) {
+    dialog.classList.add('hidden');
+  }
+  confirmationCallback = null;
+}
+
+function performLogout() {
+  state.user = null;
+  saveState();
+  success(getText('loggedOut'));
+  showPage('welcome');
+}
+
+function performDeleteEqub(equbId) {
+  const equb = state.equbs.find(e => e.id === equbId);
+  if (!equb) return;
+  
+  state.equbs = state.equbs.filter(e => e.id !== equbId);
+  if (state.currentEqubId === equbId) state.currentEqubId = null;
+  
+  pushActivity(`Deleted "${equb.name}"`);
+  saveState();
+  success(getText('equbDeleted'));
+  updateMyEqubs();
+}
+
+function performRemoveMember(memberId) {
+  const equb = getCurrentEqub();
+  if (!equb) return;
+  
+  const member = equb.members.find(m => m.id === memberId);
+  if (!member) return;
+  
+  const isSelf = memberId === state.user.id;
+  
+  // Remove member and their contributions
+  equb.members = equb.members.filter(m => m.id !== memberId);
+  equb.contributions = (equb.contributions || []).filter(c => c.userId !== memberId);
+  
+  pushActivity(`Removed ${member.name}`, equb.id);
+  
+  if (isSelf) {
+    // Handle self-removal (creator leaving)
+    if (equb.members.length > 0) {
+      equb.creatorId = equb.members[0].id;
+      pushActivity(getText('transferredOwnership', equb.members[0].name), equb.id);
+      success(getText('ownershipTransferred'));
+      state.currentEqubId = null;
+    } else {
+      // Delete equb if no members left
+      state.equbs = state.equbs.filter(e => e.id !== equb.id);
+      success(getText('equbDeleted'));
+      saveState();
+      showPage('myequbs');
+      return;
+    }
+  } else {
+    success(getText('memberRemoved'));
+  }
+  
+  saveState();
+  updateMembers();
+  updateHome();
 }
 
 /* ---------------------------------------------------------------------
@@ -279,7 +404,7 @@ function uploadProfilePic(event) {
    Translations (EN + AM)
    --------------------------------------------------------------------- */
 function getText(key, ...args) {
-  const lang = state.user?.language || 'am';
+  const lang = state.user?.language || document.body.getAttribute('data-lang') || 'en';
 
   const translations = {
     welcomeTitle: { en: "Equb", am: "እቁብ" },
@@ -287,25 +412,32 @@ function getText(key, ...args) {
     getStarted: { en: "Get Started", am: "ጀምር" },
     myEqubs: { en: "My Equbs", am: "የእኔ እቁቦች" },
     home: { en: "Home", am: "ዋና" },
-    membersTitle: { en: "Members", am: "አባላት" },
+    members: { en: "Members", am: "አባላት" },
     activity: { en: "Activity", am: "እንቅስቃሴ" },
     profile: { en: "Profile", am: "መለያ" },
     logout: { en: "Logout", am: "ውጣ" },
+    logoutConfirm: { en: "Are you sure you want to logout?", am: "እርግጠኛ ነህ መውጣት ትፈልጋለህ?" },
+    confirm: { en: "Confirm", am: "አረጋግጥ" },
+    confirmAction: { en: "Are you sure you want to proceed?", am: "እርግጠኛ ነህ መቀጠል ትፈልጋለህ?" },
 
     selectEqub: { en: "Select an Equb", am: "እቁብ ምረጥ" },
-    goal: { en: "Goal: {0} ETB", am: "ግብ፡ {0} ብር" },
-    members: { en: "Members: {0}/{1}", am: "አባላት፡ {0}/{1}" },
-    contribution: { en: "Contribution: {0} ETB", am: "አስተዋጽኦ፡ {0} ብር" },
+    goal: { en: "Goal:", am: "ግብ፡" },
+    ETB: { en: "ETB", am: "ብር" },
+    ETBEach: { en: "ETB each", am: "ብር እያንዳንዳቸው" },
+    contribution: { en: "Contribution:", am: "አስተዋጽኦ፡" },
     progress: { en: "{0}% of goal reached", am: "{0}% ተጠናቀቀ" },
     status: { en: "Status: {0}", am: "ሁኔታ፡ {0}" },
-    round: { en: "Round: {0} of {1}", am: "ዙር፡ {0} ከ {1}" },
-    todayPayments: { en: "Today's Payments ({0})", am: "የዛሬ ክፍያዎች ({0})" },
+    round: { en: "Round:", am: "ዙር፡" },
+    of: { en: "of", am: "ከ" },
+    todayPayments: { en: "Today's Payments", am: "የዛሬ ክፍያዎች" },
     paid: { en: "Paid", am: "ተከፍሏል" },
     notPaid: { en: "Not Paid", am: "አልተከፈለም" },
+    completeProgress: { en: "Complete 100% progress to enable payments", am: "ክፍያዎችን ለማንቃት 100% እድገት ያጠናቅቁ" },
 
     noEqubs: { en: "No Equbs yet — create or join one", am: "እቁብ የለም — ፍጠር ወይም ተቀላቀል" },
     createEqub: { en: "Create Equb", am: "እቁብ ፍጠር" },
     joinEqub: { en: "Join Equb", am: "እቁብ ተቀላቀል" },
+    newEqub: { en: "New Equb", am: "አዲስ እቁብ" },
 
     noMembers: { en: "No members yet", am: "አባላት የሉም" },
     invite: { en: "Invite", am: "ጋብዝ" },
@@ -314,10 +446,10 @@ function getText(key, ...args) {
 
     login: { en: "Login", am: "ግባ" },
     signup: { en: "Signup", am: "ተመዝገብ" },
-    name: { en: "Name", am: "ስም" },
-    email: { en: "Email", am: "ኢሜይል" },
+    nameSignup: { en: "Name (Signup only)", am: "ስም (ለመመዝገብ ብቻ)" },
+    emailPhone: { en: "Email or Phone", am: "ኢሜይል ወይም ስልክ" },
     password: { en: "Password", am: "የይለፍ ቃል" },
-    confirm: { en: "Confirm Password", am: "ደግሞ ተመዝገብ" },
+    confirmPassword: { en: "Confirm Password", am: "ደግሞ ተመዝገብ" },
     submit: { en: "Submit", am: "አስገባ" },
     switchTo: { en: "Switch to {0}", am: "ወደ {0} ቀይር" },
     emailExists: { en: "Email already registered", am: "ኢሜይል ተመዝግቧል" },
@@ -330,15 +462,20 @@ function getText(key, ...args) {
     noHistory: { en: "No history yet", am: "ታሪክ የለም" },
 
     createTitle: { en: "Create Equb", am: "እቁብ ፍጠር" },
-    editTitle: { en: "Edit Equb", am: "እቁብ አስተካክል" },
-    freq: { en: "Frequency", am: "ድግግሞሽ" },
-    target: { en: "Target Members", am: "የአባላት ቁጥር" },
-    goalAmt: { en: "Goal Amount (ETB)", am: "የግብ መጠን (ብር)" },
-    contrib: { en: "Contribution (ETB)", am: "አስተዋጽኦ (ብር)" },
+    editEqub: { en: "Edit Equb", am: "እቁብ አስተካክል" },
+    frequency: { en: "Frequency", am: "ድግግሞሽ" },
+    daily: { en: "Daily", am: "በየቀኑ" },
+    weekly: { en: "Weekly", am: "በሳምንት" },
+    monthly: { en: "Monthly", am: "በወር" },
+    yearly: { en: "Yearly", am: "በዓመት" },
+    targetMembers: { en: "Target Members", am: "የአባላት ቁጥር" },
+    goalAmount: { en: "Goal Amount (ETB)", am: "የግብ መጠን (ብር)" },
+    contributionAmount: { en: "Contribution (ETB)", am: "አስተዋጽኦ (ብር)" },
     startDate: { en: "Start Date", am: "መጀመሪያ ቀን" },
     create: { en: "Create", am: "ፍጠር" },
     save: { en: "Save", am: "አስቀምጥ" },
     cancel: { en: "Cancel", am: "ሰርዝ" },
+    autoCalculation: { en: "Contribution will be auto-calculated as: Goal Amount ÷ Target Members", am: "አስተዋጽኦ እንደሚከተለው በራስ-ሰር ይሰላል: የግብ መጠን ÷ የአባላት ቁጥር" },
 
     joinTitle: { en: "Join Equb", am: "እቁብ ተቀላቀል" },
     joinCode: { en: "Enter Code (EQ-XXXX-2025)", am: "ኮድ አስገባ (EQ-XXXX-2025)" },
@@ -346,16 +483,18 @@ function getText(key, ...args) {
 
     inviteTitle: { en: "Invite to Equb", am: "ወደ እቁብ ጋብዝ" },
     shareCode: { en: "Share this code:", am: "ይህን ኮድ አጋራ፡" },
-    inviteMessage: { en: "Join the fun Equb with this code:", am: "ይህን ኮድ ተጠቅመህ ወደ እቁብ ጀብዱ ተቀላቀል፡" },
     copy: { en: "Copy", am: "ቅዳ" },
     close: { en: "Close", am: "ዝጋ" },
 
-    contributeTitle: { en: "Contribute", am: "አስተዋጽኦ አድርግ" },
+    contribute: { en: "Contribute", am: "አስተዋጽኦ አድርግ" },
     selectMember: { en: "Select Member", am: "አባል ምረጥ" },
     amount: { en: "Amount (ETB)", am: "መጠን (ብር)" },
+    required: { en: "Required:", am: "የሚፈለገው፡" },
+    missedDays: { en: "missed days", am: "የተባለሉ ቀናት" },
+    pay: { en: "Pay", am: "ክፈል" },
 
-    exportBtn: { en: "Export Equb", am: "እቁብ ላክ" },
-    importBtn: { en: "Import Equb", am: "እቁብ አስገባ" },
+    exportEqub: { en: "Export Current Equb", am: "አሁን ያለውን እቁብ ላክ" },
+    importEqub: { en: "Import Equb", am: "እቁብ አስገባ" },
 
     forming: { en: "Forming", am: "በመፈጠር ላይ" },
     active: { en: "Active", am: "ንቁ" },
@@ -374,35 +513,41 @@ function getText(key, ...args) {
     paidSuccess: { en: "Paid!", am: "ተከፍሏል!" },
     goalReached: { en: "Goal reached! 100%", am: "ግቡ ተደረሰ! 100%" },
 
+    addMember: { en: "Add Member", am: "አባል ጨምር" },
+    editMember: { en: "Edit Member", am: "አባል አስተካክል" },
+    memberName: { en: "Member Name", am: "የአባል ስም" },
+    phone: { en: "Phone Number", am: "ስልክ ቁጥር" },
+    add: { en: "Add", am: "ጨምር" },
     removeMember: { en: "Remove", am: "አስወግድ" },
+    removeMemberConfirm: { en: "Are you sure you want to remove this member?", am: "ይህን አባል ለማስወገድ እርግጠኛ ነዎት?" },
     templateSaved: { en: "Template saved!", am: "አብነት ተቀመጠ!" },
     darkMode: { en: "Dark Mode", am: "ጨለማ ሁነታ" },
     exportPDF: { en: "Export to PDF", am: "ወደ PDF ላክ" },
-    qrJoin: { en: "Join via QR", am: "በQR ተቀላቀል" },
     today: { en: "Today", am: "ዛሬ" },
     yesterday: { en: "Yesterday", am: "ትናንት" },
     thisWeek: { en: "This Week", am: "በዚህ ሳምንት" },
-    missedDays: { en: "Missed {0} days ({1} ETB)", am: "{0} ቀናት ተዘለለ ({1} ብር)" },
+    missedDaysCount: { en: "Missed {0} days ({1} ETB)", am: "{0} ቀናት ተዘለለ ({1} ብር)" },
     youAreCreator: { en: "You are the creator", am: "አንተ ፈጣሪው ነህ" },
     youAreMember: { en: "You are a member", am: "አንተ አባል ነህ" },
     edit: { en: "Edit", am: "አስተካክል" },
     delete: { en: "Delete", am: "ሰርዝ" },
-    view: { en: "View", am: "ተመልከት" },
     deleteConfirm: { en: "Delete this Equb?", am: "ይህን እቁብ ሰርዝ?" },
-    phone: { en: "Phone Number", am: "ስልክ ቁጥር" },
+    view: { en: "View", am: "ተመልከት" },
     owner: { en: "(Owner)", am: "(ፈጣሪ)" },
     transferredOwnership: { en: "Transferred ownership to {0}", am: "ባለቤትነት ወደ {0} ተላለፈ" },
     memberRemoved: { en: "Member removed!", am: "አባል ተወግዷል!" },
     equbDeleted: { en: "Equb deleted!", am: "እቁብ ተሰርዟል!" },
     ownershipTransferred: { en: "Ownership transferred!", am: "ባለቤትነት ተላልፏል!" },
-    payoutTitle: { en: "Payout Round", am: "ዙር ይክፈሉ" },
+    loggedOut: { en: "Logged out", am: "ተወጣ" },
     payout: { en: "Payout", am: "ይክፈሉ" },
     selectRecipient: { en: "Select Recipient", am: "ተቀባይ ይምረጡ" },
     payoutSuccess: { en: "Payout done!", am: "ክፍያ ተጠናቀቀ!" },
     editPayoutOrder: { en: "Edit Payout Order", am: "የክፍያ ቅደም ተከተል ያርትዑ" },
+    dragReorder: { en: "Drag items or use buttons to reorder", am: "ንጥሎችን ይጎትቱ ወይም ለማስተካከል ቁልፎችን ይጠቀሙ" },
     up: { en: "Up", am: "ወደ ላይ" },
     down: { en: "Down", am: "ወደ ታች" },
-    dragToReorder: { en: "Drag to reorder", am: "ለማስተካከል ጎትት" }
+    explore: { en: "Explore", am: "ያስሱ" },
+    settings: { en: "Settings", am: "ቅንብሮች" }
   };
 
   const text = translations[key]?.[lang] || key;
@@ -413,11 +558,24 @@ function getText(key, ...args) {
    Language & Theme Management
    --------------------------------------------------------------------- */
 function setLanguage(lang) {
-  if (!state.user) return;
-  state.user.language = lang;
+  if (state.user) {
+    state.user.language = lang;
+  }
   document.body.setAttribute('data-lang', lang);
   saveState();
+  syncLanguageSelectors(lang);
   updateAllUI();
+}
+
+// FIXED: Language selector sync function
+function syncLanguageSelectors(lang) {
+  const selectors = ['welcome-language-select', 'auth-language-select', 'profile-language-select'];
+  selectors.forEach(id => {
+    const selector = el(id);
+    if (selector) {
+      selector.value = lang;
+    }
+  });
 }
 
 function toggleDarkMode(enabled) {
@@ -492,9 +650,6 @@ function showModal(id) {
     case 'invite':
       showInviteCode();
       break;
-    case 'qr':
-      showQRCode();
-      break;
     case 'payout':
       populatePayoutRecipients();
       break;
@@ -517,6 +672,7 @@ function closeModal(id) {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
+    hideConfirmation();
   }
 });
 
@@ -538,18 +694,20 @@ function generateUniqueCode() {
   return code;
 }
 
+// FIXED: AUTO-CALCULATE CONTRIBUTION
 function calculateContribution() {
-  const goalEl = el('create-goal-amount') || el('edit-goal-amount');
-  const targetEl = el('create-target-members') || el('edit-target-members');
-  const contribEl = el('create-contribution-amount') || el('edit-contribution-amount');
+  const goalEl = el('create-goal-amount');
+  const targetEl = el('create-target-members');
+  const contribEl = el('create-contribution-amount');
   
   if (!goalEl || !targetEl || !contribEl) return;
   
   const goal = parseFloat(goalEl.value) || 0;
   const target = parseInt(targetEl.value) || 0;
   
-  if (goal > 0 && target >= 2 && (!contribEl.value || contribEl.value === '0')) {
-    contribEl.value = (goal / target).toFixed(2);
+  if (goal > 0 && target >= 2) {
+    const calculated = (goal / target).toFixed(2);
+    contribEl.value = calculated;
   }
 }
 
@@ -570,7 +728,13 @@ function createEqub() {
   if (isNaN(goal) || goal <= 0) return alert('Goal amount must be positive');
   if (isNaN(contribution) || contribution <= 0) return alert('Contribution amount must be positive');
   if (!startDate) return alert('Start date is required');
-  if (new Date(startDate) < new Date().setHours(0,0,0,0)) {
+  
+  // FIX: Ensure start date is not in the past
+  const selectedStartDate = new Date(startDate);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  if (selectedStartDate < today) {
     return alert('Start date cannot be in the past');
   }
 
@@ -579,7 +743,11 @@ function createEqub() {
   const newEqub = {
     id, code, name, frequency, creatorId: state.user.id,
     admins: [{ id: state.user.id, name: state.user.name }],
-    members: [{ id: state.user.id, name: state.user.name, joinedAt: new Date().toISOString() }],
+    members: [{ 
+      id: state.user.id, 
+      name: state.user.name, 
+      joinedAt: new Date().toISOString() 
+    }],
     goalAmount: goal, 
     contributionAmount: contribution, 
     targetMembers: target,
@@ -649,24 +817,13 @@ function saveEditEqub() {
   pushActivity(`Edited "${name}"`, equb.id);
   saveState();
   closeModal('edit-equb');
-  success(getText('editTitle') + ' updated!');
+  success(getText('editEqub') + ' updated!');
   updateMyEqubs();
   if (state.currentEqubId === equb.id) updateHome();
 }
 
 function deleteEqub(equbId) {
-  const equb = state.equbs.find(e => e.id === equbId);
-  if (!equb || equb.creatorId !== state.user.id) return;
-  
-  if (!confirm(getText('deleteConfirm') || 'Delete this Equb?')) return;
-  
-  state.equbs = state.equbs.filter(e => e.id !== equbId);
-  if (state.currentEqubId === equbId) state.currentEqubId = null;
-  
-  pushActivity(`Deleted "${equb.name}"`);
-  saveState();
-  success(getText('equbDeleted'));
-  updateMyEqubs();
+  showConfirmation('deleteEqub', equbId);
 }
 
 function joinEqub() {
@@ -709,7 +866,7 @@ function shuffleArray(arr) {
 }
 
 /* ---------------------------------------------------------------------
-   Member Management
+   Member Management - FIXED
    --------------------------------------------------------------------- */
 function addMember() {
   const nameInput = el('add-member-name');
@@ -721,6 +878,8 @@ function addMember() {
   
   const equb = getCurrentEqub();
   if (!equb || equb.creatorId !== state.user.id) return alert(getText('onlyCreator'));
+  
+  // FIXED: Allow adding members if equb is forming OR active but not full
   if (equb.status === 'completed') return alert(getText('completed'));
   if (equb.members.length >= equb.targetMembers) return alert(getText('equbFull'));
   if (equb.members.some(m => m.name.toLowerCase() === name.toLowerCase())) {
@@ -740,6 +899,7 @@ function addMember() {
   if (equb.members.length === equb.targetMembers && equb.status === 'forming') {
     equb.status = 'active';
     equb.payoutOrder = shuffleArray(equb.members.map(m => ({ ...m })));
+    pushActivity(`Equb "${equb.name}" is now active! All members joined.`, equb.id);
   }
   
   pushActivity(`${name} added by ${state.user.name}`, equb.id);
@@ -794,48 +954,11 @@ function saveEditMember() {
 }
 
 function removeMember(memberId) {
-  const equb = getCurrentEqub();
-  if (!equb || equb.creatorId !== state.user.id) return alert(getText('onlyCreator'));
-  
-  const member = equb.members.find(m => m.id === memberId);
-  if (!member) return;
-  
-  if (!confirm(`Remove ${member.name} from this Equb?`)) return;
-  
-  const isSelf = memberId === state.user.id;
-  
-  // Remove member and their contributions
-  equb.members = equb.members.filter(m => m.id !== memberId);
-  equb.contributions = (equb.contributions || []).filter(c => c.userId !== memberId);
-  
-  pushActivity(`Removed ${member.name}`, equb.id);
-  
-  if (isSelf) {
-    // Handle self-removal (creator leaving)
-    if (equb.members.length > 0) {
-      equb.creatorId = equb.members[0].id;
-      pushActivity(getText('transferredOwnership', equb.members[0].name), equb.id);
-      success(getText('ownershipTransferred'));
-      state.currentEqubId = null;
-    } else {
-      // Delete equb if no members left
-      state.equbs = state.equbs.filter(e => e.id !== equb.id);
-      success(getText('equbDeleted'));
-      saveState();
-      showPage('myequbs');
-      return;
-    }
-  } else {
-    success(getText('memberRemoved'));
-  }
-  
-  saveState();
-  updateMembers();
-  updateHome();
+  showConfirmation('removeMember', memberId);
 }
 
 /* ---------------------------------------------------------------------
-   Contribution Management
+   Contribution Management - FIXED PAYMENT SYSTEM
    --------------------------------------------------------------------- */
 function populateContributionMembers() {
   const select = el('contribution-member');
@@ -850,6 +973,13 @@ function populateContributionMembers() {
     const opt = document.createElement('option');
     opt.value = m.id;
     opt.textContent = escapeHtml(m.name);
+    
+    // Show payment status in dropdown
+    const missed = computeMemberMissedCycles(equb, m);
+    if (missed > 0) {
+      opt.textContent += ` (${missed} missed - ${formatCurrency(missed * equb.contributionAmount)} ETB)`;
+    }
+    
     select.appendChild(opt);
   });
   
@@ -874,15 +1004,16 @@ function updateRequiredAmount() {
   
   const member = equb.members.find(m => m.id === memberId);
   const missed = computeMemberMissedCycles(equb, member);
-  const total = equb.contributionAmount + missed * equb.contributionAmount;
+  const totalRequired = equb.contributionAmount + missed * equb.contributionAmount;
   
-  if (el('required-amount')) el('required-amount').textContent = formatCurrency(total);
+  if (el('required-amount')) el('required-amount').textContent = formatCurrency(totalRequired);
   if (el('missed-count')) el('missed-count').textContent = missed;
   if (el('required-amount-display')) el('required-amount-display').style.display = 'block';
   
-  // Auto-fill amount field
+  // Auto-fill amount field with required amount
   if (el('contribute-amount')) {
-    el('contribute-amount').value = total.toFixed(2);
+    el('contribute-amount').value = totalRequired.toFixed(2);
+    el('contribute-amount').placeholder = `Required: ${formatCurrency(totalRequired)} ETB`;
   }
 }
 
@@ -901,31 +1032,37 @@ function contribute() {
   const missed = computeMemberMissedCycles(equb, member);
   const required = equb.contributionAmount + missed * equb.contributionAmount;
   
-  if (Math.abs(amount - required) > 0.001) {
-    return alert(getText('mustPayExact', formatCurrency(required)));
+  // FIXED: Allow admin to accept any amount, but warn if less than required
+  if (amount < required) {
+    const confirmMsg = `You are paying ${formatCurrency(amount)} ETB, but ${member.name} owes ${formatCurrency(required)} ETB. Continue anyway?`;
+    if (!confirm(confirmMsg)) return;
   }
   
   const today = toDateOnlyString(new Date());
-  const alreadyPaid = (equb.contributions || []).some(c => 
-    c.userId === memberId && toDateOnlyString(c.date) === today
-  );
   
-  if (equb.frequency === 'daily' && alreadyPaid) {
-    return alert('Already paid today');
+  // Check if already paid today for daily equbs
+  if (equb.frequency === 'daily') {
+    const alreadyPaid = (equb.contributions || []).some(c => 
+      c.userId === memberId && toDateOnlyString(c.date) === today
+    );
+    
+    if (alreadyPaid) {
+      return alert(`${member.name} has already paid today`);
+    }
   }
 
   equb.contributions = equb.contributions || [];
   equb.contributions.push({ 
     amount, 
     userId: memberId, 
-    date: new Date().toISOString() 
+    date: new Date().toISOString(),
+    memberName: member.name
   });
   
   pushActivity(`${member.name} paid ${formatCurrency(amount)} ETB`, equb.id);
 
-  // Update progress
-  const total = equb.contributions.reduce((s, c) => s + (c.amount || 0), 0);
-  equb.progress = equb.goalAmount ? Math.min(100, (total / equb.goalAmount) * 100) : 0;
+  // FIXED: Update progress based on ACTUAL total collected vs goal
+  updateEqubProgress(equb);
   
   saveState();
   closeModal('contribute');
@@ -933,22 +1070,52 @@ function contribute() {
   updateHome();
   updateMembers();
 
-  // Celebrate goal completion
+  // Celebrate goal completion only when ALL members have paid their required amounts
   if (equb.progress >= 100 && !equb.celebrated) {
-    equb.celebrated = true;
-    launchConfetti();
-    success(getText('goalReached'));
+    const allPaidUp = checkAllMembersPaidUp(equb);
+    if (allPaidUp) {
+      equb.celebrated = true;
+      launchConfetti();
+      success(getText('goalReached'));
+    }
   }
 }
 
+// FIXED: Proper progress calculation
+function updateEqubProgress(equb) {
+  if (!equb) return;
+  
+  // Calculate total actually collected from all contributions
+  const totalCollected = (equb.contributions || []).reduce((sum, c) => sum + (c.amount || 0), 0);
+  
+  // Progress is based on actual collected amount vs goal
+  equb.progress = equb.goalAmount ? Math.min(100, (totalCollected / equb.goalAmount) * 100) : 0;
+  
+  // Auto-activate equb if we reach target members and have some progress
+  if (equb.status === 'forming' && equb.members.length >= equb.targetMembers && equb.progress > 0) {
+    equb.status = 'active';
+    pushActivity(`Equb "${equb.name}" is now active!`, equb.id);
+  }
+}
+
+// FIXED: Check if all members are paid up (no missed payments)
+function checkAllMembersPaidUp(equb) {
+  if (!equb || equb.members.length === 0) return false;
+  
+  return equb.members.every(member => {
+    const missed = computeMemberMissedCycles(equb, member);
+    return missed === 0;
+  });
+}
+
 /* ---------------------------------------------------------------------
-   Payment Cycle Calculations
+   Payment Cycle Calculations - IMPROVED
    --------------------------------------------------------------------- */
 function computeMemberMissedCycles(equb, member) {
   if (!equb || !member || equb.status !== 'active') return 0;
   
   const today = new Date(); 
-  today.setHours(0,0,0,0);
+  today.setHours(0, 0, 0, 0);
   
   // Determine cycle interval based on frequency
   let cycleMs;
@@ -960,25 +1127,51 @@ function computeMemberMissedCycles(equb, member) {
     default: return 0;
   }
   
+  // Get member's contributions sorted by date (newest first)
   const memberContributions = (equb.contributions || [])
     .filter(c => c.userId === member.id)
     .sort((a, b) => new Date(b.date) - new Date(a.date));
   
-  const lastPayment = memberContributions.length ? 
-    new Date(memberContributions[0].date) : 
-    new Date(member.joinedAt);
+  // Find the start date for this member (when they joined or equb started, whichever is later)
+  const memberStartDate = new Date(Math.max(
+    new Date(member.joinedAt).getTime(),
+    new Date(equb.startDate).getTime()
+  ));
+  memberStartDate.setHours(0, 0, 0, 0);
   
-  lastPayment.setHours(0,0,0,0);
+  // FIX: Don't count today as a cycle if the equb just started
+  const comparisonDate = new Date(today);
   
-  // Calculate missed cycles since last payment
-  const msSinceLastPayment = today - lastPayment;
-  const missedCycles = Math.floor(msSinceLastPayment / cycleMs);
+  // If the start date is today, no cycles have been missed yet
+  if (memberStartDate.getTime() === today.getTime()) {
+    return 0;
+  }
   
-  return Math.max(0, missedCycles);
+  let lastPayment = memberStartDate;
+  
+  // If member has payments, use the most recent one
+  if (memberContributions.length > 0) {
+    lastPayment = new Date(memberContributions[0].date);
+    lastPayment.setHours(0, 0, 0, 0);
+  }
+  
+  // FIX: Calculate cycles from start to yesterday (not including today)
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  
+  // Calculate total expected cycles from start date to yesterday
+  const totalExpectedCycles = Math.max(0, Math.floor((yesterday - memberStartDate) / cycleMs) + 1);
+  
+  // Calculate paid cycles
+  const paidCycles = memberContributions.length;
+  
+  // Missed cycles = total expected cycles - paid cycles
+  const missedCycles = Math.max(0, totalExpectedCycles - paidCycles);
+  
+  return missedCycles;
 }
-
 /* ---------------------------------------------------------------------
-   Payout Management
+   Payout Management - UPDATED
    --------------------------------------------------------------------- */
 function populatePayoutRecipients() {
   const select = el('payout-recipient');
@@ -989,12 +1182,22 @@ function populatePayoutRecipients() {
   const equb = getCurrentEqub();
   if (!equb) return;
   
-  // Find members who haven't received payout yet
-  const eligible = (equb.members || []).filter(m => 
-    !(equb.payoutHistory || []).some(p => p.recipientId === m.id)
-  );
+  // FIXED: PAYOUT ORDER LOOPING LOGIC
+  const allMembers = equb.members || [];
+  const payoutHistory = equb.payoutHistory || [];
   
-  eligible.forEach(m => {
+  let eligibleMembers = [];
+  
+  if (payoutHistory.length >= allMembers.length) {
+    // All members have been paid - restart cycle
+    eligibleMembers = allMembers;
+  } else {
+    // Find members who haven't received payout yet
+    const paidMemberIds = payoutHistory.map(p => p.recipientId);
+    eligibleMembers = allMembers.filter(m => !paidMemberIds.includes(m.id));
+  }
+  
+  eligibleMembers.forEach(m => {
     const opt = document.createElement('option');
     opt.value = m.id;
     opt.textContent = escapeHtml(m.name);
@@ -1011,7 +1214,14 @@ function performPayout() {
   }
   
   const recipient = equb.members.find(m => m.id === recipientId);
-  if (!recipient) return alert('Recipient not found');
+  if (!recipient) return alert('Member not found');
+  
+  // FIXED: Check if all members are paid up before allowing payout
+  const allPaidUp = checkAllMembersPaidUp(equb);
+  if (!allPaidUp) {
+    const unpaidCount = equb.members.filter(m => computeMemberMissedCycles(equb, m) > 0).length;
+    return alert(`Cannot process payout. ${unpaidCount} members still have unpaid contributions.`);
+  }
   
   equb.payoutHistory = equb.payoutHistory || [];
   const round = equb.payoutHistory.length + 1;
@@ -1034,21 +1244,26 @@ function performPayout() {
   equb.contributions = [];
   equb.celebrated = false;
   
-  // Complete equb if all members received payout
-  if (equb.payoutHistory.length === equb.targetMembers) {
+  // Complete equb if all members received payout and we've completed full cycles
+  const totalPayouts = equb.payoutHistory.length;
+  const totalMembers = equb.targetMembers;
+  
+  if (totalPayouts >= totalMembers && totalPayouts % totalMembers === 0) {
     equb.status = 'completed';
-    pushActivity(`Equb "${equb.name}" completed!`, equb.id);
+    pushActivity(`Equb "${equb.name}" completed! All members have received their payouts.`, equb.id);
+    success('Equb completed! All payouts distributed.');
+  } else {
+    success(getText('payoutSuccess'));
   }
   
   saveState();
   closeModal('payout');
-  success(getText('payoutSuccess'));
   updateHome();
   updateMembers();
 }
 
 /* ---------------------------------------------------------------------
-   Payout Order Management (Drag & Drop)
+   Payout Order Management (Drag & Drop) - FIXED MISSING FUNCTIONS
    --------------------------------------------------------------------- */
 function populatePayoutOrderList() {
   const list = el('payout-order-list');
@@ -1059,8 +1274,23 @@ function populatePayoutOrderList() {
   const equb = getCurrentEqub();
   if (!equb) return;
   
-  // Initialize payout order if not set
-  equb.payoutOrder = equb.payoutOrder || shuffleArray(equb.members.map(m => ({ ...m })));
+  // Initialize payout order if not set or needs update
+  if (!equb.payoutOrder || equb.payoutOrder.length !== equb.members.length) {
+    equb.payoutOrder = shuffleArray(equb.members.map(m => ({ ...m })));
+  }
+  
+  // Ensure payout order only contains current members
+  const currentMemberIds = equb.members.map(m => m.id);
+  equb.payoutOrder = equb.payoutOrder.filter(member => 
+    currentMemberIds.includes(member.id)
+  );
+  
+  // Add any missing members
+  equb.members.forEach(member => {
+    if (!equb.payoutOrder.some(m => m.id === member.id)) {
+      equb.payoutOrder.push({ ...member });
+    }
+  });
   
   equb.payoutOrder.forEach((member, index) => {
     const item = document.createElement('div');
@@ -1070,7 +1300,7 @@ function populatePayoutOrderList() {
     item.dataset.memberId = member.id;
     
     item.innerHTML = `
-      <span class="drag-handle" aria-label="${getText('dragToReorder')}">⋮⋮</span>
+      <span class="drag-handle" aria-label="${getText('dragReorder')}">⋮⋮</span>
       <span class="order-number">${index + 1}</span>
       <span class="member-name">${escapeHtml(member.name)}</span>
       <div class="payout-order-controls">
@@ -1150,6 +1380,277 @@ function savePayoutOrder() {
 }
 
 /* ---------------------------------------------------------------------
+   Enhanced Home Page Display - FIXED
+   --------------------------------------------------------------------- */
+function updateHome() {
+  const equb = getCurrentEqub();
+  if (!equb) {
+    setText('equb-name', getText('selectEqub'));
+    return;
+  }
+
+  setText('equb-name', escapeHtml(equb.name || ''));
+  setText('home-goal-amount', formatCurrency(equb.goalAmount));
+  setText('members-count', String((equb.members || []).length || 0));
+  setText('home-target-members', String(equb.targetMembers || 0));
+  setText('home-contribution-amount', formatCurrency(equb.contributionAmount));
+
+  // Update progress circle
+  const fg = document.querySelector('.progress-fg');
+  let percent = Number(equb.progress) || 0;
+  if (fg) {
+    const r = parseFloat(fg.getAttribute('r')) || 90;
+    const circumference = 2 * Math.PI * r;
+    const offset = circumference - (percent / 100) * circumference;
+    fg.style.strokeDasharray = `${circumference}`;
+    fg.style.strokeDashoffset = `${offset}`;
+  }
+
+  setText('progress-percent', (percent.toFixed(0) + '%'));
+  
+  const collected = (equb.contributions || []).reduce((s, c) => s + (c.amount || 0), 0);
+  const remaining = Math.max(0, (equb.goalAmount || 0) - collected);
+  setText('progress-remaining', `${formatCurrency(remaining)} ${getText('ETB')} left`);
+
+  // FIXED: Show actual payment status
+  const allPaidUp = checkAllMembersPaidUp(equb);
+  const statusText = allPaidUp ? 'Ready for Payout' : getText(equb.status);
+  setText('status', getText('status', statusText));
+
+  setText('current-round', String((equb.payoutHistory || []).length + 1));
+  setText('total-rounds', String(equb.targetMembers || 0));
+
+  // FIXED: Payment gating logic
+  const paymentNotice = el('payment-notice');
+  const contributeBtn = el('contribute-button');
+  const payoutBtn = el('payout-button');
+  
+  // Enable contribute button always
+  if (contributeBtn) {
+    contributeBtn.disabled = false;
+    contributeBtn.style.pointerEvents = 'auto';
+    contributeBtn.style.opacity = '1';
+  }
+  
+  // Payout button only for creator when ALL members are paid up AND progress is 100%
+  if (payoutBtn) {
+    if (percent >= 100 && allPaidUp && equb.creatorId === state.user?.id) {
+      payoutBtn.disabled = false;
+      payoutBtn.style.pointerEvents = 'auto';
+      payoutBtn.style.opacity = '1';
+      if (paymentNotice) paymentNotice.style.display = 'none';
+    } else {
+      payoutBtn.disabled = true;
+      payoutBtn.style.pointerEvents = 'none';
+      payoutBtn.style.opacity = '0.5';
+      
+      // Show appropriate notice
+      if (paymentNotice) {
+        if (percent < 100) {
+          paymentNotice.innerHTML = `<span data-key="completeProgress">Complete 100% progress to enable payouts</span>`;
+        } else if (!allPaidUp) {
+          const unpaidCount = equb.members.filter(m => computeMemberMissedCycles(equb, m) > 0).length;
+          paymentNotice.innerHTML = `<span>${unpaidCount} members still have unpaid contributions</span>`;
+        } else {
+          paymentNotice.style.display = 'none';
+        }
+      }
+    }
+  }
+  
+  // Update daily payments section
+  updateDailyPayments(equb);
+}
+
+function updateDailyPayments(equb) {
+  const dailyDiv = el('daily-payments');
+  if (!dailyDiv) return;
+  
+  if (equb.frequency === 'daily') {
+    dailyDiv.style.display = 'block';
+    setText('current-date', new Date().toLocaleDateString());
+    
+    const list = el('payments-list');
+    if (list) {
+      list.innerHTML = '';
+      const today = toDateOnlyString(new Date());
+      
+      (equb.members || []).forEach(m => {
+        const paidToday = (equb.contributions || []).some(c => 
+          c.userId === m.id && toDateOnlyString(c.date) === today
+        );
+        
+        const missed = computeMemberMissedCycles(equb, m);
+        const totalOwed = missed * equb.contributionAmount;
+        
+        const div = document.createElement('div');
+        div.className = `payment-status ${paidToday ? 'paid' : 'not-paid'}`;
+        
+        let statusText = paidToday ? getText('paid') : getText('notPaid');
+        if (missed > 0 && !paidToday) {
+          statusText += ` (${missed} missed - ${formatCurrency(totalOwed)} ETB)`;
+        }
+        
+        div.innerHTML = `
+          <span class="member-name">${escapeHtml(m.name)}</span>
+          <span class="status">${statusText}</span>
+        `;
+        list.appendChild(div);
+      });
+    }
+  } else {
+    dailyDiv.style.display = 'none';
+  }
+}
+
+/* ---------------------------------------------------------------------
+   Enhanced Members Display - FIXED
+   --------------------------------------------------------------------- */
+function updateMembers() {
+  const list = el('member-list');
+  const empty = el('no-members');
+  if (!list) return;
+  
+  list.innerHTML = '';
+  const equb = getCurrentEqub();
+  
+  if (!equb || !(equb.members || []).length) {
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+  
+  if (empty) empty.style.display = 'none';
+
+  (equb.members || []).forEach((member, index) => {
+    const card = document.createElement('div');
+    card.className = 'glass-card';
+    
+    const isOwner = member.id === equb.creatorId;
+    const hasPayout = (equb.payoutHistory || []).some(p => p.recipientId === member.id);
+    const payoutOrderIndex = equb.payoutOrder?.findIndex(m => m.id === member.id) ?? index;
+    const missed = computeMemberMissedCycles(equb, member);
+    const totalOwed = missed * equb.contributionAmount;
+    
+    let html = `
+      <p style="font-weight:600">
+        ${escapeHtml(member.name)} 
+        ${isOwner ? `<small>${getText('owner')}</small>` : ''}
+        ${hasPayout ? '💰' : ''}
+      </p>
+      <p>${getText('phone')}: ${escapeHtml(member.phone || '-')}</p>
+      <p>${getText('editPayoutOrder')}: #${payoutOrderIndex + 1}</p>
+    `;
+
+    // Enhanced payment status
+    if (equb.frequency === 'daily') {
+      const today = toDateOnlyString(new Date());
+      const paidToday = (equb.contributions || []).some(c => 
+        c.userId === member.id && toDateOnlyString(c.date) === today
+      );
+      
+      if (paidToday) {
+        html += `<div class="payment-status paid">${getText('paid')} today</div>`;
+      } else if (missed > 0) {
+        html += `<div class="payment-status not-paid">${getText('missedDaysCount', missed, formatCurrency(totalOwed))}</div>`;
+      } else {
+        html += `<div class="payment-status not-paid">${getText('notPaid')} today</div>`;
+      }
+    } else {
+      // For non-daily equbs, show overall payment status
+      const totalContributions = (equb.contributions || []).filter(c => c.userId === member.id).length;
+      html += `<p>Payments made: ${totalContributions}</p>`;
+      if (missed > 0) {
+        html += `<div class="payment-status not-paid">${getText('missedDaysCount', missed, formatCurrency(totalOwed))}</div>`;
+      }
+      html += `<p>${getText('memberSince')}: ${new Date(member.joinedAt).toLocaleDateString()}</p>`;
+    }
+
+    card.innerHTML = html;
+
+    // Add action buttons for creator
+    if (equb.creatorId === state.user?.id) {
+      const buttonRow = document.createElement('div');
+      buttonRow.className = 'button-row';
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'glass-button small';
+      editBtn.textContent = getText('edit');
+      editBtn.onclick = (e) => { e.stopPropagation(); openEditMember(member.id); };
+      buttonRow.appendChild(editBtn);
+
+      // Quick pay button for members with missed payments
+      if (missed > 0) {
+        const quickPayBtn = document.createElement('button');
+        quickPayBtn.className = 'glass-button small';
+        quickPayBtn.style.background = '#22c55e';
+        quickPayBtn.textContent = `Pay ${formatCurrency(totalOwed + equb.contributionAmount)}`;
+        quickPayBtn.onclick = (e) => { 
+          e.stopPropagation(); 
+          quickPayMember(member.id); 
+        };
+        buttonRow.appendChild(quickPayBtn);
+      }
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'glass-button small';
+      removeBtn.style.background = '#ef4444';
+      removeBtn.textContent = getText('removeMember');
+      removeBtn.onclick = (e) => { e.stopPropagation(); removeMember(member.id); };
+      buttonRow.appendChild(removeBtn);
+
+      card.appendChild(buttonRow);
+    }
+
+    list.appendChild(card);
+  });
+
+  // Update action buttons
+  const addBtnContainer = document.querySelector('#members-page .action-buttons');
+  if (addBtnContainer) {
+    addBtnContainer.innerHTML = '';
+    
+    if (equb.creatorId === state.user?.id) {
+      const addBtn = document.createElement('button');
+      addBtn.className = 'glass-button';
+      addBtn.textContent = getText('addMember');
+      addBtn.onclick = () => showModal('add-member');
+      addBtnContainer.appendChild(addBtn);
+    }
+    
+    const inviteBtn = document.createElement('button');
+    inviteBtn.className = 'glass-button secondary';
+    inviteBtn.textContent = getText('invite');
+    inviteBtn.onclick = () => showModal('invite');
+    addBtnContainer.appendChild(inviteBtn);
+    
+    const editOrderBtn = document.createElement('button');
+    editOrderBtn.className = 'glass-button secondary';
+    editOrderBtn.textContent = getText('editPayoutOrder');
+    editOrderBtn.onclick = () => showModal('edit-payout-order');
+    addBtnContainer.appendChild(editOrderBtn);
+  }
+}
+
+// FIXED: Quick pay function for admins
+function quickPayMember(memberId) {
+  const equb = getCurrentEqub();
+  if (!equb || equb.creatorId !== state.user?.id) return;
+  
+  const member = equb.members.find(m => m.id === memberId);
+  if (!member) return;
+  
+  const missed = computeMemberMissedCycles(equb, member);
+  const totalRequired = equb.contributionAmount + missed * equb.contributionAmount;
+  
+  // Auto-fill the contribution form
+  setValue('contribution-member', memberId);
+  setValue('contribute-amount', totalRequired.toFixed(2));
+  
+  // Show the contribute modal
+  showModal('contribute');
+}
+
+/* ---------------------------------------------------------------------
    Activity & History Management
    --------------------------------------------------------------------- */
 function pushActivity(message, equbId = null) {
@@ -1197,7 +1698,7 @@ function getActivityEmoji(message) {
   if (msg.includes('paid') || /ከፈለ/.test(msg)) return '💰';
   if (msg.includes('payout') || /ደረሰ/.test(msg)) return '🏆';
   if (msg.includes('added') || /ጨመረ/.test(msg)) return '➕';
-  if (msg.includes('edited') || /አስተካከለ/.test(msg)) return '✏️';
+  if (msg.includes('edited') || /አስተካክለ/.test(msg)) return '✏️';
   if (msg.includes('removed') || /አስወገደ/.test(msg)) return '➖';
   if (msg.includes('deleted')) return '🗑️';
   if (msg.includes('transferred')) return '🔄';
@@ -1211,181 +1712,15 @@ function getCurrentEqub() {
   if (!state.user) return null;
   if (!state.equbs || !state.currentEqubId) return null;
   
-  return state.equbs.find(e =>
-    e.id === state.currentEqubId &&
-    (e.creatorId === state.user.id || 
-     (Array.isArray(e.members) && e.members.some(m => m.id === state.user.id)))
-  ) || null;
-}
-
-function updateHome() {
-  const equb = getCurrentEqub();
-  if (!equb) {
-    setText('equb-name', getText('selectEqub'));
-    return;
-  }
-
-  setText('equb-name', escapeHtml(equb.name || ''));
-  setText('home-goal-amount', formatCurrency(equb.goalAmount));
-  setText('members-count', String((equb.members || []).length || 0));
-  setText('home-target-members', String(equb.targetMembers || 0));
-  setText('home-contribution-amount', formatCurrency(equb.contributionAmount));
-
-  // Update progress circle
-  const fg = document.querySelector('.progress-fg');
-  let percent = Number(equb.progress) || 0;
-  if (fg) {
-    const r = parseFloat(fg.getAttribute('r')) || 90;
-    const circumference = 2 * Math.PI * r;
-    const offset = circumference - (percent / 100) * circumference;
-    fg.style.strokeDasharray = `${circumference}`;
-    fg.style.strokeDashoffset = `${offset}`;
-  }
-
-  setText('progress-percent', (percent.toFixed(0) + '%'));
+  const equb = state.equbs.find(e => e.id === state.currentEqubId);
   
-  const collected = (equb.contributions || []).reduce((s, c) => s + (c.amount || 0), 0);
-  const remaining = Math.max(0, (equb.goalAmount || 0) - collected);
-  setText('progress-remaining', `${formatCurrency(remaining)} ETB left`);
-
-  setText('status', getText('status', getText(equb.status)));
-  setText('current-round', String((equb.payoutHistory || []).length + 1));
-  setText('total-rounds', String(equb.targetMembers || 0));
-
-  // Update daily payments section
-  const dailyDiv = el('daily-payments');
-  if (equb.frequency === 'daily' && dailyDiv) {
-    dailyDiv.style.display = 'block';
-    setText('current-date', new Date().toLocaleDateString());
-    
-    const list = el('payments-list');
-    if (list) {
-      list.innerHTML = '';
-      const today = toDateOnlyString(new Date());
-      
-      (equb.members || []).forEach(m => {
-        const paid = (equb.contributions || []).some(c => 
-          c.userId === m.id && toDateOnlyString(c.date) === today
-        );
-        
-        const div = document.createElement('div');
-        div.className = `payment-status ${paid ? 'paid' : 'not-paid'}`;
-        div.innerHTML = `
-          <span>${escapeHtml(m.name)}</span>
-          <span>${paid ? getText('paid') : getText('notPaid')}</span>
-        `;
-        list.appendChild(div);
-      });
-    }
-  } else if (dailyDiv) {
-    dailyDiv.style.display = 'none';
-  }
-}
-
-function updateMembers() {
-  const list = el('member-list');
-  const empty = el('no-members');
-  if (!list) return;
-  
-  list.innerHTML = '';
-  const equb = getCurrentEqub();
-  
-  if (!equb || !(equb.members || []).length) {
-    if (empty) empty.style.display = 'block';
-    return;
+  // Check if user is creator OR member of this equb
+  if (equb && (equb.creatorId === state.user.id || 
+      (Array.isArray(equb.members) && equb.members.some(m => m.id === state.user.id)))) {
+    return equb;
   }
   
-  if (empty) empty.style.display = 'none';
-
-  (equb.members || []).forEach((member, index) => {
-    const card = document.createElement('div');
-    card.className = 'glass-card';
-    
-    const isOwner = member.id === equb.creatorId;
-    const hasPayout = (equb.payoutHistory || []).some(p => p.recipientId === member.id);
-    const payoutOrderIndex = equb.payoutOrder?.findIndex(m => m.id === member.id) ?? index;
-    
-    let html = `
-      <p style="font-weight:600">
-        ${escapeHtml(member.name)} 
-        ${isOwner ? `<small>${getText('owner')}</small>` : ''}
-        ${hasPayout ? '💰' : ''}
-      </p>
-      <p>${getText('phone')}: ${escapeHtml(member.phone || '-')}</p>
-      <p>${getText('editPayoutOrder')}: #${payoutOrderIndex + 1}</p>
-    `;
-
-    // Add payment status for daily equbs
-    if (equb.frequency === 'daily') {
-      const today = toDateOnlyString(new Date());
-      const paid = (equb.contributions || []).some(c => 
-        c.userId === member.id && toDateOnlyString(c.date) === today
-      );
-      const missed = computeMemberMissedCycles(equb, member);
-      
-      if (paid) {
-        html += `<div class="payment-status paid">${getText('paid')}</div>`;
-      } else if (missed > 0) {
-        const amt = (missed * equb.contributionAmount);
-        html += `<div class="payment-status not-paid">${getText('missedDays', missed, formatCurrency(amt))}</div>`;
-      } else {
-        html += `<div class="payment-status not-paid">${getText('notPaid')}</div>`;
-      }
-    } else {
-      html += `<p>${getText('memberSince')}: ${new Date(member.joinedAt).toLocaleDateString()}</p>`;
-    }
-
-    card.innerHTML = html;
-
-    // Add action buttons for creator
-    if (equb.creatorId === state.user?.id) {
-      const buttonRow = document.createElement('div');
-      buttonRow.className = 'button-row';
-
-      const editBtn = document.createElement('button');
-      editBtn.className = 'glass-button small';
-      editBtn.textContent = getText('edit');
-      editBtn.onclick = (e) => { e.stopPropagation(); openEditMember(member.id); };
-      buttonRow.appendChild(editBtn);
-
-      const removeBtn = document.createElement('button');
-      removeBtn.className = 'glass-button small';
-      removeBtn.style.background = '#ef4444';
-      removeBtn.textContent = getText('removeMember');
-      removeBtn.onclick = (e) => { e.stopPropagation(); removeMember(member.id); };
-      buttonRow.appendChild(removeBtn);
-
-      card.appendChild(buttonRow);
-    }
-
-    list.appendChild(card);
-  });
-
-  // Update action buttons
-  const addBtnContainer = document.querySelector('#members-page .action-buttons');
-  if (addBtnContainer) {
-    addBtnContainer.innerHTML = '';
-    
-    if (equb.creatorId === state.user?.id) {
-      const addBtn = document.createElement('button');
-      addBtn.className = 'glass-button';
-      addBtn.textContent = getText('addMember');
-      addBtn.onclick = () => showModal('add-member');
-      addBtnContainer.appendChild(addBtn);
-    }
-    
-    const inviteBtn = document.createElement('button');
-    inviteBtn.className = 'glass-button secondary';
-    inviteBtn.textContent = getText('invite');
-    inviteBtn.onclick = () => showModal('invite');
-    addBtnContainer.appendChild(inviteBtn);
-    
-    const editOrderBtn = document.createElement('button');
-    editOrderBtn.className = 'glass-button secondary';
-    editOrderBtn.textContent = getText('editPayoutOrder');
-    editOrderBtn.onclick = () => showModal('edit-payout-order');
-    addBtnContainer.appendChild(editOrderBtn);
-  }
+  return null;
 }
 
 function updateActivity() {
@@ -1577,9 +1912,9 @@ function updateProfile() {
     }
 
     // Update language selector
-    const langSelect = el('language-select');
+    const langSelect = el('profile-language-select');
     if (langSelect) {
-      langSelect.value = state.user.language || 'am';
+      langSelect.value = state.user.language || 'en';
       langSelect.onchange = () => setLanguage(langSelect.value);
     }
 
@@ -1637,14 +1972,17 @@ function setAuthMode(mode) {
   
   const nameField = el('auth-name');
   const confirmField = el('auth-confirm');
+  const confirmLabel = document.querySelector('label[for="auth-confirm"]');
+  
+  // FIXED: Show/hide name and confirm password fields properly
   if (nameField) nameField.style.display = isSignup ? 'block' : 'none';
   if (confirmField) confirmField.style.display = isSignup ? 'block' : 'none';
+  if (confirmLabel) confirmLabel.style.display = isSignup ? 'block' : 'none';
 
   // Update switch button
   const switchBtn = el('auth-switch');
   if (switchBtn) {
     switchBtn.textContent = getText(isSignup ? 'login' : 'signup');
-    switchBtn.onclick = () => setAuthMode(isSignup ? 'login' : 'signup');
   }
 }
 
@@ -1688,15 +2026,6 @@ function authAction() {
   showPage('myequbs');
 }
 
-function logout() {
-  if (!confirm('Are you sure you want to logout?')) return;
-  
-  state.user = null;
-  saveState();
-  success('Logged out');
-  showPage('welcome');
-}
-
 /* ---------------------------------------------------------------------
    Invite & Sharing
    --------------------------------------------------------------------- */
@@ -1706,7 +2035,7 @@ function showInviteCode() {
     setText('invite-code', equb.code);
   }
   if (el('share-code')) {
-    setText('share-code', getText('inviteMessage'));
+    setText('share-code', getText('shareCode'));
   }
 }
 
@@ -1716,7 +2045,7 @@ function copyInviteCode() {
   
   const shareData = {
     title: getText('inviteTitle'),
-    text: `${getText('inviteMessage')} ${code}`,
+    text: `${getText('shareCode')} ${code}`,
     url: `${window.location.origin}${window.location.pathname}?join=${code}`
   };
   
@@ -1742,38 +2071,6 @@ function fallbackCopy(code) {
       document.body.removeChild(tempInput);
       success(getText('copy') + '!');
     });
-}
-
-/* ---------------------------------------------------------------------
-   QR Code Generation
-   --------------------------------------------------------------------- */
-function showQRCode() {
-  const equb = getCurrentEqub();
-  if (!equb) return;
-  
-  const url = `${window.location.origin}${window.location.pathname}?join=${equb.code}`;
-  
-  if (window.QRCode) {
-    const canvas = el('qr-canvas');
-    if (canvas) {
-      QRCode.toCanvas(canvas, url, { width: 200 }, err => {
-        if (err) {
-          console.error('QR generation failed:', err);
-          fallbackQR(url);
-        } else {
-          showModal('qr');
-        }
-      });
-    }
-  } else {
-    fallbackQR(url);
-  }
-}
-
-function fallbackQR(url) {
-  // Fallback: show URL in invite modal
-  setText('invite-code', url);
-  showModal('invite');
 }
 
 /* ---------------------------------------------------------------------
@@ -1804,7 +2101,7 @@ function exportCurrentEqub() {
   a.click();
   URL.revokeObjectURL(url);
   
-  success(`${getText('exportBtn')}: ${equb.name}`);
+  success(`${getText('exportEqub')}: ${equb.name}`);
 }
 
 function importEqub(event) {
@@ -1863,9 +2160,9 @@ function importEqub(event) {
 }
 
 /* ---------------------------------------------------------------------
-   PDF Export
+   PDF Export - Fixed Version
    --------------------------------------------------------------------- */
-function exportToPDF() {
+async function exportToPDF() {
   const equb = getCurrentEqub();
   if (!equb) return alert('No equb selected');
 
@@ -1876,132 +2173,346 @@ function exportToPDF() {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF('p', 'mm', 'a4');
 
-  const margin = 15;
+  // Color scheme
+  const primaryColor = [56, 189, 248];
+  const secondaryColor = [139, 92, 246];
+  const successColor = [34, 197, 94];
+  const warningColor = [245, 158, 11];
+  const grayColor = [107, 114, 128];
+  
+  const margin = 20;
   let y = margin;
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const contentWidth = pageWidth - (margin * 2);
 
-  // Header
-  doc.setFillColor(56, 189, 248);
-  doc.rect(0, 0, 210, 30, 'F');
+  // ===== HEADER WITH LOGO =====
+  doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+  doc.rect(0, 0, pageWidth, 45, 'F');
+  
+  // Enhanced logo handling with CORS fix
+  try {
+    const logoBase64 = await loadLogoAsBase64();
+    if (logoBase64) {
+      // Add logo image
+      doc.addImage(logoBase64, 'PNG', margin, 10, 25, 25);
+    } else {
+      // Fallback: Create simple logo - pass all required parameters
+      createFallbackLogo(doc, margin, equb, pageWidth);
+    }
+  } catch (e) {
+    console.log('Logo loading failed, using fallback:', e);
+    createFallbackLogo(doc, margin, equb, pageWidth);
+  }
+  
+  // Title
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(20);
-  doc.text('E Q U B  -  Report', 105, 18, { align: 'center' });
-
-  y = 40;
-  doc.setTextColor(0, 0, 0);
-  doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
-  doc.text(`Equb Name: ${equb.name}`, margin, y);
-  y += 8;
-
+  doc.setFontSize(22);
+  doc.text('EQUB REPORT', pageWidth / 2, 20, { align: 'center' });
+  
+  // Equb name subtitle
   doc.setFontSize(12);
   doc.setFont('helvetica', 'normal');
+  doc.text(equb.name, pageWidth / 2, 30, { align: 'center' });
 
+  y = 55;
+
+  // Rest of the PDF content...
   const totalContributions = equb.contributions.reduce((sum, c) => sum + (c.amount || 0), 0);
   const remaining = Math.max(0, equb.goalAmount - totalContributions);
   const progress = equb.goalAmount ? ((totalContributions / equb.goalAmount) * 100).toFixed(1) : '0.0';
-
+  
+  // Create summary boxes
+  let statusText = 'Active';
+  if (equb.status === 'forming') statusText = 'Forming';
+  if (equb.status === 'completed') statusText = 'Completed';
+  
   const summaryData = [
-    ['Goal Amount', `${formatCurrency(equb.goalAmount)} ETB`],
-    ['Total Collected', `${formatCurrency(totalContributions)} ETB`],
-    ['Remaining', `${formatCurrency(remaining)} ETB`],
-    ['Contribution per Member', `${formatCurrency(equb.contributionAmount)} ETB`],
-    ['Target Members', `${equb.targetMembers}`],
-    ['Current Members', `${equb.members.length}`],
-    ['Progress', `${progress}%`],
-    ['Status', getText(equb.status)]
+    { label: 'Goal Amount', value: `${formatCurrency(equb.goalAmount)} ETB`, color: primaryColor },
+    { label: 'Total Collected', value: `${formatCurrency(totalContributions)} ETB`, color: successColor },
+    { label: 'Remaining', value: `${formatCurrency(remaining)} ETB`, color: warningColor },
+    { label: 'Progress', value: `${progress}%`, color: secondaryColor },
+    { label: 'Members', value: `${equb.members.length}/${equb.targetMembers}`, color: grayColor },
+    { label: 'Status', value: statusText, color: equb.status === 'active' ? successColor : warningColor }
   ];
 
-  doc.setDrawColor(200, 200, 200);
-  doc.setLineWidth(0.1);
-  summaryData.forEach(([label, val]) => {
+  // Draw summary cards in 2 columns
+  const cardWidth = (contentWidth - 10) / 2;
+  const cardHeight = 18;
+  
+  summaryData.forEach((item, index) => {
+    const row = Math.floor(index / 2);
+    const col = index % 2;
+    const x = margin + (col * (cardWidth + 10));
+    const cardY = y + (row * (cardHeight + 8));
+    
+    doc.setFillColor(item.color[0], item.color[1], item.color[2], 0.1);
+    doc.roundedRect(x, cardY, cardWidth, cardHeight, 3, 3, 'F');
+    
+    doc.setDrawColor(item.color[0], item.color[1], item.color[2], 0.3);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(x, cardY, cardWidth, cardHeight, 3, 3);
+    
     doc.setFont('helvetica', 'bold');
-    doc.text(label + ':', margin, y);
+    doc.setFontSize(8);
+    doc.setTextColor(grayColor[0], grayColor[1], grayColor[2]);
+    doc.text(item.label, x + 6, cardY + 6);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(0, 0, 0);
+    doc.text(item.value, x + 6, cardY + 12);
+  });
+
+  y += (Math.ceil(summaryData.length / 2) * (cardHeight + 8)) + 20;
+
+  // Continue with the rest of your existing PDF content...
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+  doc.text('Equb Details', margin, y);
+  y += 8;
+
+  let frequencyText = 'Monthly';
+  if (equb.frequency === 'daily') frequencyText = 'Daily';
+  if (equb.frequency === 'weekly') frequencyText = 'Weekly';
+  if (equb.frequency === 'yearly') frequencyText = 'Yearly';
+  
+  const details = [
+    ['Frequency', frequencyText],
+    ['Contribution Amount', `${formatCurrency(equb.contributionAmount)} ETB`],
+    ['Start Date', new Date(equb.startDate).toLocaleDateString()],
+    ['Rounds Completed', String(equb.payoutHistory?.length || 0)],
+    ['Current Round', String((equb.payoutHistory?.length || 0) + 1)],
+    ['Equb Code', equb.code]
+  ];
+
+  doc.setFontSize(9);
+  doc.setDrawColor(200, 200, 200);
+  
+  details.forEach(([label, value], index) => {
+    if (y > doc.internal.pageSize.getHeight() - 25) {
+      doc.addPage();
+      y = margin;
+    }
+    
+    if (index % 2 === 0) {
+      doc.setFillColor(248, 250, 252);
+      doc.rect(margin, y, contentWidth, 7, 'F');
+    }
+    
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(grayColor[0], grayColor[1], grayColor[2]);
+    doc.text(label + ':', margin + 5, y + 5);
+    
     doc.setFont('helvetica', 'normal');
-    doc.text(String(val), 120, y);
+    doc.setTextColor(0, 0, 0);
+    doc.text(String(value), margin + 45, y + 5);
+    
     y += 7;
   });
 
-  y += 5;
-  doc.setDrawColor(56, 189, 248);
-  doc.setLineWidth(0.3);
-  doc.line(margin, y, 210 - margin, y);
-  y += 10;
+  y += 12;
 
   // Members table
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
+  doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
   doc.text('Members Overview', margin, y);
-  y += 8;
+  y += 10;
 
-  doc.setFontSize(12);
-  const headers = ['#', 'Name', 'Phone', 'Joined', 'Paid Today', 'Missed Days', 'Missed Amount'];
-  const colWidths = [8, 40, 35, 30, 20, 20, 35];
-
+  const headers = ['#', 'Name', 'Phone', 'Status', 'Missed', 'Balance'];
+  const colWidths = [12, 45, 35, 25, 20, 28];
+  
+  doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+  doc.rect(margin, y, contentWidth, 8, 'F');
+  
   let x = margin;
   doc.setFont('helvetica', 'bold');
-  headers.forEach((h, i) => {
-    doc.text(h, x, y);
+  doc.setFontSize(8);
+  doc.setTextColor(255, 255, 255);
+  
+  headers.forEach((header, i) => {
+    doc.text(header, x + (colWidths[i] / 2), y + 5, { align: 'center' });
     x += colWidths[i];
   });
-  y += 6;
-  doc.setFont('helvetica', 'normal');
+
+  y += 8;
 
   const today = toDateOnlyString(new Date());
   const pageHeight = doc.internal.pageSize.getHeight();
+  
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(0, 0, 0);
 
-  equb.members.forEach((m, i) => {
-    const paid = equb.contributions.some(c => c.userId === m.id && toDateOnlyString(c.date) === today);
-    const missed = computeMemberMissedCycles(equb, m);
-    const missedAmt = missed * equb.contributionAmount;
-
+  equb.members.forEach((member, index) => {
     if (y > pageHeight - 20) {
       doc.addPage();
-      y = margin + 5;
+      y = margin;
+      
+      doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.rect(margin, y, contentWidth, 8, 'F');
+      
+      x = margin;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(255, 255, 255);
+      headers.forEach((header, i) => {
+        doc.text(header, x + (colWidths[i] / 2), y + 5, { align: 'center' });
+        x += colWidths[i];
+      });
+      y += 8;
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(0, 0, 0);
     }
 
+    if (index % 2 === 0) {
+      doc.setFillColor(248, 250, 252);
+      doc.rect(margin, y, contentWidth, 7, 'F');
+    }
+
+    const paid = equb.contributions.some(c => c.userId === member.id && toDateOnlyString(c.date) === today);
+    const missed = computeMemberMissedCycles(equb, member);
+    const balance = missed * equb.contributionAmount;
+    const isCreator = member.id === equb.creatorId;
+
     x = margin;
-    const row = [
-      String(i + 1),
-      m.name,
-      m.phone || '-',
-      new Date(m.joinedAt).toLocaleDateString(),
-      paid ? 'Yes' : 'No',
+    
+    const rowData = [
+      String(index + 1),
+      member.name + (isCreator ? ' (Owner)' : ''),
+      member.phone || '-',
+      paid ? 'Paid' : 'Pending',
       String(missed),
-      missedAmt ? formatCurrency(missedAmt) + ' ETB' : '-'
+      balance > 0 ? `-${formatCurrency(balance)}` : 'Clear'
     ];
 
-    row.forEach((cell, idx) => {
-      doc.text(String(cell), x, y);
-      x += colWidths[idx];
+    rowData.forEach((cell, colIndex) => {
+      const isNumeric = colIndex === 0 || colIndex === 4;
+      const align = isNumeric ? 'center' : 'left';
+      const padding = colIndex === 0 ? 6 : 3;
+      
+      if (colIndex === 3) {
+        doc.setTextColor(paid ? successColor[0] : warningColor[0], 
+                        paid ? successColor[1] : warningColor[1], 
+                        paid ? successColor[2] : warningColor[2]);
+      } else if (colIndex === 5 && balance > 0) {
+        doc.setTextColor(239, 68, 68);
+      } else {
+        doc.setTextColor(0, 0, 0);
+      }
+      
+      doc.text(String(cell), x + padding, y + 4, { align });
+      x += colWidths[colIndex];
     });
+
+    doc.setTextColor(0, 0, 0);
     y += 7;
   });
 
-  y += 10;
+  // Footer
+  const footerY = doc.internal.pageSize.getHeight() - 12;
+  
+  doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2], 0.5);
+  doc.setLineWidth(0.3);
+  doc.line(margin, footerY - 8, pageWidth - margin, footerY - 8);
+
   doc.setFont('helvetica', 'italic');
-  doc.setFontSize(10);
-  doc.setTextColor(100);
-  doc.text(`Exported by: ${state.user?.name || 'Unknown User'}`, margin, y);
-  y += 5;
-  doc.text(`Date: ${new Date().toLocaleString()}`, margin, y);
+  doc.setFontSize(7);
+  doc.setTextColor(grayColor[0], grayColor[1], grayColor[2]);
+  
+  const generatedBy = `Generated by: ${state.user?.name || 'Unknown User'}`;
+  const generatedDate = `Date: ${new Date().toLocaleDateString()}`;
+  
+  doc.text(generatedBy, margin, footerY - 3);
+  doc.text('Equb App © 2025', pageWidth / 2, footerY - 3, { align: 'center' });
+  doc.text(generatedDate, pageWidth - margin, footerY - 3, { align: 'right' });
 
-  // Add profile picture if available
-  if (state.user?.profilePic) {
-    try {
-      doc.addImage(state.user.profilePic, 'JPEG', 170, 10, 25, 25);
-    } catch (e) {
-      console.warn('Profile image skipped:', e);
+  const fileName = `Equb_${equb.name.replace(/[^\w\s]/gi, '_')}_Report_${toDateOnlyString(new Date())}.pdf`;
+  
+  setTimeout(() => {
+    doc.save(fileName);
+    success(getText('exportPDF'));
+  }, 100);
+}
+
+/* ---------------------------------------------------------------------
+   Fixed Helper Functions for PDF
+   --------------------------------------------------------------------- */
+function loadLogoAsBase64() {
+  return new Promise((resolve) => {
+    // Try to get the logo from the page first (from your HTML)
+    const existingLogo = document.querySelector('.welcome-logo');
+    if (existingLogo && existingLogo.src) {
+      // For same-origin images, try to convert to base64
+      if (isSameOrigin(existingLogo.src)) {
+        getBase64FromImage(existingLogo).then(resolve).catch(() => resolve(null));
+      } else {
+        // For cross-origin images, we can't convert to base64 due to CORS
+        // Just use the image URL directly (jsPDF can handle some external URLs)
+        resolve(existingLogo.src);
+      }
+      return;
     }
+
+    // If no logo found, resolve with null to use fallback
+    resolve(null);
+  });
+}
+
+function isSameOrigin(url) {
+  try {
+    const imgUrl = new URL(url, window.location.href);
+    const currentUrl = new URL(window.location.href);
+    return imgUrl.origin === currentUrl.origin;
+  } catch {
+    return false;
   }
+}
 
-  doc.setFont('helvetica', 'bolditalic');
-  doc.setFontSize(10);
+function getBase64FromImage(img) {
+  return new Promise((resolve, reject) => {
+    // Only proceed if image is from same origin
+    if (!isSameOrigin(img.src)) {
+      reject(new Error('Cross-origin image cannot be converted to base64'));
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    
+    try {
+      ctx.drawImage(img, 0, 0);
+      const dataURL = canvas.toDataURL('image/png');
+      resolve(dataURL);
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function createFallbackLogo(doc, margin, equb, pageWidth) {
+  // FIXED: Now pageWidth is passed as a parameter
+  // Simple text-based logo
+  doc.setFillColor(255, 255, 255);
+  doc.circle(margin + 15, 22, 8, 'F');
+  doc.setFont('helvetica', 'bold');
   doc.setTextColor(56, 189, 248);
-  doc.text('Generated by Equb App © 2025', 105, 285, { align: 'center' });
-
-  doc.save(`Equb-${equb.name.replace(/\s+/g, '_')}-${toDateOnlyString(new Date())}.pdf`);
-  success(getText('exportPDF'));
+  doc.setFontSize(10);
+  doc.text('E', margin + 15, 24, { align: 'center' });
+  
+  // Title (already set in main function, but keep for consistency)
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(22);
+  doc.text('EQUB REPORT', pageWidth / 2, 20, { align: 'center' });
+  
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'normal');
+  doc.text(equb.name, pageWidth / 2, 30, { align: 'center' });
 }
 
 /* ---------------------------------------------------------------------
@@ -2066,6 +2577,7 @@ function launchConfetti() {
   }
 
   draw();
+  
   
   // Auto-cleanup
   setTimeout(() => {
@@ -2169,28 +2681,31 @@ function updateAllUI() {
   }
 
   // Apply language
-  if (state.user?.language) {
-    document.body.setAttribute('data-lang', state.user.language);
-  }
+  const currentLang = state.user?.language || 'en';
+  document.body.setAttribute('data-lang', currentLang);
 
-  // Update all text content
-  document.querySelectorAll('[id]').forEach(element => {
-    const id = element.id;
-    if (id.startsWith('welcome-') || id.includes('title') || id.includes('Text')) {
-      const key = id.replace(/-/g, '').replace('title', 'Title').replace('text', '');
-      const text = getText(key);
-      if (text && text !== key) {
-        element.textContent = text;
+  // Update all text content with proper language handling
+  document.querySelectorAll('[data-key]').forEach(element => {
+    const key = element.getAttribute('data-key');
+    const translated = getText(key);
+    if (translated && translated !== key) {
+      if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+        element.placeholder = translated;
+      } else {
+        element.textContent = translated;
       }
     }
   });
 
-  // Update navigation text
-  document.querySelectorAll('.nav-text').forEach((element, index) => {
-    const texts = ['home', 'myEqubs', 'membersTitle', 'activity', 'profile'];
-    if (texts[index]) {
-      element.textContent = getText(texts[index]);
-    }
+  // Update select options based on language
+  document.querySelectorAll('select.form-field').forEach(select => {
+    Array.from(select.options).forEach(option => {
+      const key = option.textContent.trim();
+      const translated = getText(key);
+      if (translated && translated !== key) {
+        option.textContent = translated;
+      }
+    });
   });
 
   // Refresh all page content
@@ -2235,14 +2750,32 @@ document.addEventListener('DOMContentLoaded', () => {
   const contribSelect = el('contribution-member');
   if (contribSelect) contribSelect.addEventListener('change', updateRequiredAmount);
 
-  // Set up auto-calculation for contribution amount
-  const goalInputs = ['create-goal-amount', 'edit-goal-amount', 'create-target-members', 'edit-target-members'];
+  // FIXED: AUTO-CALCULATION FOR CONTRIBUTION AMOUNT
+  const goalInputs = ['create-goal-amount', 'create-target-members'];
   goalInputs.forEach(id => {
     const input = el(id);
     if (input) {
       input.addEventListener('input', calculateContribution);
     }
   });
+
+  // FIXED: LANGUAGE SELECTORS
+  const languageSelectors = ['welcome-language-select', 'auth-language-select', 'profile-language-select'];
+  languageSelectors.forEach(id => {
+    const selector = el(id);
+    if (selector) {
+      selector.value = state.user?.language || 'en';
+      selector.addEventListener('change', (e) => {
+        setLanguage(e.target.value);
+      });
+    }
+  });
+
+  // Set up confirmation dialog buttons
+  const yesBtn = el('confirmation-yes');
+  const noBtn = el('confirmation-no');
+  if (yesBtn) yesBtn.onclick = () => confirmationCallback && confirmationCallback(true);
+  if (noBtn) noBtn.onclick = () => confirmationCallback && confirmationCallback(false);
 
   // Initialize auth UI
   setAuthMode('login');
@@ -2269,7 +2802,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  console.log('Equb App v8.0 initialized successfully');
+  console.log('Equb App v8.3 initialized successfully - All fixes applied');
 });
 
 // Export for potential module usage
@@ -2281,4 +2814,4 @@ if (typeof module !== 'undefined' && module.exports) {
   };
 }
 
-/* End of script.js v8.0 */
+/* End of script.js v8.3 - FIXED EDITION */
