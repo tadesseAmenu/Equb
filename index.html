@@ -11,9 +11,6 @@
   <!-- jsPDF -->
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 
-  <!-- QR Code -->
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
-
   <!-- App styles -->
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -23,18 +20,35 @@
     <div id="toast-container" role="status" aria-live="polite"></div>
     <canvas id="confetti-canvas" style="position:fixed;top:0;left:0;pointer-events:none;z-index:9999;display:none;" aria-hidden="true"></canvas>
 
+    <!-- Confirmation Dialog -->
+    <div id="confirmation-dialog" class="confirmation-dialog hidden">
+      <h3 id="confirmation-title">Confirm Action</h3>
+      <p id="confirmation-message">Are you sure you want to proceed?</p>
+      <div class="dialog-buttons">
+        <button class="glass-button" id="confirmation-yes">Yes</button>
+        <button class="glass-button secondary" id="confirmation-no">No</button>
+      </div>
+    </div>
+
     <!-- ====================== PAGES ====================== -->
     <!-- Welcome -->
     <section id="welcome-page" class="page active" aria-labelledby="welcome-title">
-      <div class="glass-card center-card">
+      <div class="glass-card center-card welcome-container">
         <img src="logo.png" alt="Equb logo" class="welcome-logo" />
-        <h1 id="welcome-title" class="lang-en">Equb</h1>
-        <h1 id="welcome-title-am" class="lang-am" style="display:none;">እቁብ</h1>
-        <p id="welcome-sub" class="lang-en">Community Savings, Together.</p>
-        <p id="welcome-sub-am" class="lang-am" style="display:none;">አብረን እንቆጥብ፣ አብረን እንዘምት!</p>
-        <button class="glass-button" type="button" onclick="showPage('profile')">
-          <span class="lang-en">Get Started</span>
-          <span class="lang-am" style="display:none;">ጀምር</span>
+        <h1 id="welcome-title" data-key="welcomeTitle">Equb</h1>
+        <p id="welcome-sub" data-key="welcomeSub">Community Savings, Together.</p>
+        
+        <!-- Language Selector for Welcome Page -->
+        <div class="language-selector-container">
+          <label for="welcome-language-select" class="form-label" data-key="language">Language</label>
+          <select id="welcome-language-select" class="form-field" aria-label="Select language">
+            <option value="en">English</option>
+            <option value="am">አማርኛ</option>
+          </select>
+        </div>
+        
+        <button class="glass-button welcome-button" type="button" onclick="showPage('profile')">
+          <span data-key="getStarted">Get Started</span>
         </button>
       </div>
     </section>
@@ -43,9 +57,9 @@
     <section id="home-page" class="page" style="display:none;" aria-labelledby="equb-name">
       <div class="glass-card">
         <h1 id="equb-name"></h1>
-        <p><span class="lang-en">Goal:</span><span class="lang-am" style="display:none;">ግብ፡</span> <span id="home-goal-amount"></span> <span class="lang-en">ETB</span><span class="lang-am" style="display:none;">ብር</span></p>
-        <p><span class="lang-en">Members:</span><span class="lang-am" style="display:none;">አባላት፡</span> <span id="members-count"></span>/<span id="home-target-members"></span></p>
-        <p><span class="lang-en">Contribution:</span><span class="lang-am" style="display:none;">አስተዋጽኦ፡</span> <span id="home-contribution-amount"></span> <span class="lang-en">ETB each</span><span class="lang-am" style="display:none;">ብር እያንዳንዳቸው</span></p>
+        <p><span data-key="goal">Goal:</span> <span id="home-goal-amount"></span> <span data-key="ETB">ETB</span></p>
+        <p><span data-key="members">Members:</span> <span id="members-count"></span>/<span id="home-target-members"></span></p>
+        <p><span data-key="contribution">Contribution:</span> <span id="home-contribution-amount"></span> <span data-key="ETBEach">ETB each</span></p>
 
         <div class="progress-container" aria-label="Progress toward goal">
           <svg class="progress-ring" viewBox="0 0 200 200" role="img" aria-label="Equb progress ring">
@@ -61,19 +75,24 @@
           </svg>
           <div class="progress-center">
             <div class="progress-percent" id="progress-percent"></div>
+            <div class="progress-remaining" id="progress-remaining"></div>
           </div>
         </div>
 
+        <!-- Payment Gating Notice -->
+        <div id="payment-notice" class="payment-notice" style="display: none;">
+          <span data-key="completeProgress">Complete 100% progress to enable payments</span>
+        </div>
+
         <span id="status"></span>
-        <p><span class="lang-en">Round:</span><span class="lang-am" style="display:none;">ዙር፡</span> <span id="current-round"></span> <span class="lang-en">of</span><span class="lang-am" style="display:none;">ከ</span> <span id="total-rounds"></span></p>
+        <p><span data-key="round">Round:</span> <span id="current-round"></span> <span data-key="of">of</span> <span id="total-rounds"></span></p>
       </div>
 
       <!-- Today's payments -->
       <div id="daily-payments" class="info-section" style="display:none;">
         <div class="glass-card">
           <h2>
-            <span class="lang-en">Today's Payments</span>
-            <span class="lang-am" style="display:none;">የዛሬ ክፍያዎች</span>
+            <span data-key="todayPayments">Today's Payments</span>
             (<span id="current-date"></span>)
           </h2>
           <div id="payments-list" class="payments-vertical-list" aria-live="polite"></div>
@@ -81,47 +100,35 @@
       </div>
 
       <div class="action-buttons" role="group" aria-label="Home actions">
-        <button class="gradient-button" type="button" onclick="showModal('contribute')">
-          <span class="lang-en">Contribution</span>
-          <span class="lang-am" style="display:none;">አስተዋጽኦ አድርግ</span>
+        <button class="gradient-button" type="button" onclick="showModal('contribute')" id="contribute-button">
+          <span data-key="contribution">Contribution</span>
         </button>
         <button class="gradient-button" type="button" onclick="showPage('members')">
-          <span class="lang-en">Members</span>
-          <span class="lang-am" style="display:none;">አባላት</span>
+          <span data-key="members">Members</span>
         </button>
         <button class="gradient-button" type="button" onclick="showModal('create-equb')">
-          <span class="lang-en">New Equb</span>
-          <span class="lang-am" style="display:none;">አዲስ እቁብ</span>
+          <span data-key="newEqub">New Equb</span>
         </button>
-        <button class="gradient-button" type="button" onclick="showModal('payout')">
-          <span class="lang-en">Payout</span>
-          <span class="lang-am" style="display:none;">ይክፈሉ</span>
+        <button class="gradient-button" type="button" onclick="showModal('payout')" id="payout-button">
+          <span data-key="payout">Payout</span>
         </button>
       </div>
     </section>
 
     <!-- My Equbs -->
     <section id="myequbs-page" class="page" style="display:none;" aria-labelledby="myequbs-title">
-      <h1 id="myequbs-title">
-        <span class="lang-en">My Equbs</span>
-        <span class="lang-am" style="display:none;">የእኔ እቁቦች</span>
-      </h1>
+      <h1 id="myequbs-title" data-key="myEqubs">My Equbs</h1>
       <div id="equb-list" class="scroll-list" role="list"></div>
       <p id="no-equbs" class="empty-state" aria-live="polite"></p>
 
       <div class="glass-card">
-        <h2>
-          <span class="lang-en">Explore</span>
-          <span class="lang-am" style="display:none;">ያስሱ</span>
-        </h2>
+        <h2 data-key="explore">Explore</h2>
         <div class="button-group" role="group" aria-label="Equb explore actions">
           <button class="glass-button" type="button" onclick="showModal('create-equb')">
-            <span class="lang-en">Create Equb</span>
-            <span class="lang-am" style="display:none;">እቁብ ፍጠር</span>
+            <span data-key="createEqub">Create Equb</span>
           </button>
           <button class="glass-button" type="button" onclick="showModal('join-equb')">
-            <span class="lang-en">Join Equb</span>
-            <span class="lang-am" style="display:none;">እቁብ ተቀላቀል</span>
+            <span data-key="joinEqub">Join Equb</span>
           </button>
         </div>
       </div>
@@ -129,21 +136,16 @@
 
     <!-- Members -->
     <section id="members-page" class="page" style="display:none;" aria-labelledby="members-title">
-      <h1 id="members-title">
-        <span class="lang-en">Members</span>
-        <span class="lang-am" style="display:none;">አባላት</span>
-      </h1>
+      <h1 id="members-title" data-key="members">Members</h1>
       <div id="member-list" class="scroll-list" role="list"></div>
       <p id="no-members" class="empty-state" aria-live="polite"></p>
 
       <div class="action-buttons" role="group" aria-label="Member actions">
         <button class="glass-button" type="button" onclick="showModal('add-member')">
-          <span class="lang-en">Add Member</span>
-          <span class="lang-am" style="display:none;">አባል ጨምር</span>
+          <span data-key="addMember">Add Member</span>
         </button>
         <button class="glass-button" type="button" onclick="showModal('edit-payout-order')">
-          <span class="lang-en">Edit Payout Order</span>
-          <span class="lang-am" style="display:none;">የክፍያ ቅደም ተከተል ያርትዑ</span>
+          <span data-key="editPayoutOrder">Edit Payout Order</span>
         </button>
       </div>
     </section>
@@ -151,10 +153,7 @@
     <!-- Activity -->
     <section id="activity-page" class="page" style="display:none;" aria-labelledby="activity-title">
       <div class="feed">
-        <h1 id="activity-title" style="text-align:center;margin:10px 0;">
-          <span class="lang-en">Activity Feed</span>
-          <span class="lang-am" style="display:none;">የእንቅስቃሴ ማስታወቂያ</span>
-        </h1>
+        <h1 id="activity-title" style="text-align:center;margin:10px 0;" data-key="activity">Activity Feed</h1>
         <div id="activity-feed" role="list"></div>
         <p id="no-activity" class="empty-state" aria-live="polite"></p>
       </div>
@@ -167,53 +166,45 @@
         <h1 id="auth-title"></h1>
         <p id="auth-help" class="sr-only">Use the form below to login or sign up</p>
 
-        <label for="auth-name" class="sr-only">
-          <span class="lang-en">Name (Signup only)</span>
-          <span class="lang-am" style="display:none;">ስም (ለመመዝገብ ብቻ)</span>
-        </label>
-        <input id="auth-name" class="form-field" style="display:none;" autocomplete="name"/>
+        <!-- Language Selector for Login/Signup -->
+        <div class="language-selector-container">
+          <label for="auth-language-select" class="form-label" data-key="language">Language</label>
+          <select id="auth-language-select" class="form-field" aria-label="Select language">
+            <option value="en">English</option>
+            <option value="am">አማርኛ</option>
+          </select>
+        </div>
 
-        <label for="auth-email" class="sr-only">
-          <span class="lang-en">Email or Phone</span>
-          <span class="lang-am" style="display:none;">ኢሜይል ወይም ስልክ</span>
-        </label>
-        <input id="auth-email" class="form-field" autocomplete="email" inputmode="email"/>
+        <!-- Fixed: Added proper labels for all form fields -->
+        <div class="form-row">
+          <label for="auth-name" class="form-label" data-key="nameSignup">Name (Signup only)</label>
+          <input id="auth-name" class="form-field" style="display:none;" autocomplete="name" placeholder="Enter your name"/>
+        </div>
 
-        <label for="auth-password" class="sr-only">
-          <span class="lang-en">Password</span>
-          <span class="lang-am" style="display:none;">የይለፍ ቃል</span>
-        </label>
-        <input id="auth-password" type="password" class="form-field" autocomplete="current-password"/>
+        <div class="form-row">
+          <label for="auth-email" class="form-label" data-key="emailPhone">Email or Phone</label>
+          <input id="auth-email" class="form-field" autocomplete="email" inputmode="email" placeholder="Enter email or phone"/>
+        </div>
 
-        <label for="auth-confirm" class="sr-only">
-          <span class="lang-en">Confirm Password</span>
-          <span class="lang-am" style="display:none;">የይለፍ ቃል አረጋግጥ</span>
-        </label>
-        <input id="auth-confirm" style="display:none;" type="password" class="form-field" autocomplete="new-password"/>
+        <div class="form-row">
+          <label for="auth-password" class="form-label" data-key="password">Password</label>
+          <input id="auth-password" type="password" class="form-field" autocomplete="current-password" placeholder="Enter password"/>
+        </div>
+
+        <div class="form-row">
+          <label for="auth-confirm" class="form-label" data-key="confirmPassword" style="display:none;">Confirm Password</label>
+          <input id="auth-confirm" style="display:none;" type="password" class="form-field" autocomplete="new-password" placeholder="Confirm password"/>
+        </div>
 
         <div class="modal-buttons">
           <button class="glass-button" type="button" onclick="authAction()">
-            <span class="lang-en">Submit</span>
-            <span class="lang-am" style="display:none;">አስገባ</span>
+            <span data-key="submit">Submit</span>
           </button>
-          <button class="glass-button secondary" type="button" onclick="toggleAuthMode()">
-            <span class="lang-en">Switch to</span>
-            <span class="lang-am" style="display:none;">ወደ</span>
+          <button class="glass-button secondary auth-switch-button" type="button" onclick="toggleAuthMode()">
+            <span data-key="switchTo">Switch to</span>
             <span id="auth-switch"></span>
           </button>
         </div>
-      </div>
-
-      <!-- Language selector -->
-      <div style="text-align:center;margin:15px 0;">
-        <label for="language-select" class="sr-only">
-          <span class="lang-en">Language</span>
-          <span class="lang-am" style="display:none;">ቋንቋ</span>
-        </label>
-        <select id="language-select" class="form-field" aria-label="Select language">
-          <option value="en">English</option>
-          <option value="am">አማርኛ</option>
-        </select>
       </div>
 
       <!-- Profile Card -->
@@ -224,8 +215,7 @@
             <div id="profile-pic-placeholder" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:2em;" aria-hidden="true">?</div>
           </div>
           <label for="upload-pic" class="glass-button small" style="cursor:pointer;" aria-label="Upload profile photo">
-            <span class="lang-en">Upload Photo</span>
-            <span class="lang-am" style="display:none;">ፎቶ ስቀል</span>
+            <span data-key="uploadPhoto">Upload Photo</span>
             <input type="file" id="upload-pic" accept="image/*" style="display:none;"/>
           </label>
         </div>
@@ -235,50 +225,47 @@
 
       <!-- History Card -->
       <div id="history-card" class="glass-card hidden" aria-labelledby="history-title">
-        <h2 id="history-title">
-          <span class="lang-en">History</span>
-          <span class="lang-am" style="display:none;">ታሪክ</span>
-        </h2>
+        <h2 id="history-title" data-key="history">History</h2>
         <div id="history-list" class="feed" role="list"></div>
         <p id="no-history" class="empty-state" aria-live="polite"></p>
       </div>
 
       <!-- Settings Card -->
-      <div id="settings-card" class="glass-card hidden" aria-labelledby="settings-title">
-        <h2 id="settings-title">
-          <span class="lang-en">Settings</span>
-          <span class="lang-am" style="display:none;">ቅንብሮች</span>
-        </h2>
+      <div id="settings-card" class="glass-card hidden settings-container" aria-labelledby="settings-title">
+        <h2 id="settings-title" data-key="settings">Settings</h2>
 
-        <div style="margin:10px 0;">
-          <span class="lang-en">Dark Mode</span>
-          <span class="lang-am" style="display:none;">ጨለማ ሁነታ</span>
+        <div class="setting-item">
+          <span data-key="darkMode">Dark Mode</span>
           <label class="toggle-switch" aria-label="Toggle dark mode">
             <input type="checkbox" id="dark-mode-toggle"/>
             <span class="slider" aria-hidden="true"></span>
           </label>
         </div>
 
-        <div style="margin-top:20px;">
+        <div class="setting-item">
+          <label for="profile-language-select" class="setting-label" data-key="language">Language</label>
+          <select id="profile-language-select" class="form-field" aria-label="Select language">
+            <option value="en">English</option>
+            <option value="am">አማርኛ</option>
+          </select>
+        </div>
+
+        <div class="setting-buttons">
           <button class="glass-button small" type="button" onclick="exportCurrentEqub()">
-            <span class="lang-en">Export Current Equb</span>
-            <span class="lang-am" style="display:none;">አሁን ያለውን እቁብ ላክ</span>
+            <span data-key="exportEqub">Export Current Equb</span>
           </button>
           <label for="import-file" class="glass-button small" style="display:inline-block;margin-left:10px;cursor:pointer;">
-            <span class="lang-en">Import Equb</span>
-            <span class="lang-am" style="display:none;">እቁብ አስገባ</span>
+            <span data-key="importBtn">Import Equb</span>
           </label>
           <input type="file" id="import-file" accept=".json" style="display:none;"/>
           <button class="glass-button small" type="button" onclick="exportToPDF()" style="margin-top:8px;display:block;">
-            <span class="lang-en">Export to PDF</span>
-            <span class="lang-am" style="display:none;">ወደ PDF ላክ</span>
+            <span data-key="exportPDF">Export to PDF</span>
           </button>
         </div>
       </div>
 
-      <button id="logout-button" class="glass-button hidden" type="button" onclick="logout()">
-        <span class="lang-en">Logout</span>
-        <span class="lang-am" style="display:none;">ውጣ</span>
+      <button id="logout-button" class="glass-button hidden" type="button" onclick="showConfirmation('logout')">
+        <span data-key="logout">Logout</span>
       </button>
     </section>
 
@@ -286,72 +273,41 @@
     <!-- Create Equb -->
     <div id="create-equb-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="create-title">
       <div class="modal-content">
-        <h2 id="create-title">
-          <span class="lang-en">Create Equb</span>
-          <span class="lang-am" style="display:none;">እቁብ ፍጠር</span>
-        </h2>
+        <h2 id="create-title" data-key="createEqub">Create Equb</h2>
 
-        <label for="create-equb-name" class="sr-only">
-          <span class="lang-en">Equb Name</span>
-          <span class="lang-am" style="display:none;">የእቁብ ስም</span>
-        </label>
-        <input id="create-equb-name" class="form-field"/>
+        <label for="create-equb-name" class="form-label" data-key="equbName">Equb Name</label>
+        <input id="create-equb-name" class="form-field" placeholder="Enter equb name"/>
 
-        <label for="create-equb-frequency" class="sr-only">
-          <span class="lang-en">Frequency</span>
-          <span class="lang-am" style="display:none;">ድግግሞሽ</span>
-        </label>
+        <label for="create-equb-frequency" class="form-label" data-key="frequency">Frequency</label>
         <select id="create-equb-frequency" class="form-field" aria-label="Frequency">
-          <option value="daily">
-            <span class="lang-en">Daily</span>
-            <span class="lang-am" style="display:none;">በየቀኑ</span>
-          </option>
-          <option value="weekly">
-            <span class="lang-en">Weekly</span>
-            <span class="lang-am" style="display:none;">በሳምንት</span>
-          </option>
-          <option value="monthly">
-            <span class="lang-en">Monthly</span>
-            <span class="lang-am" style="display:none;">በወር</span>
-          </option>
-          <option value="yearly">
-            <span class="lang-en">Yearly</span>
-            <span class="lang-am" style="display:none;">በዓመት</span>
-          </option>
+          <option value="daily" data-key="daily">Daily</option>
+          <option value="weekly" data-key="weekly">Weekly</option>
+          <option value="monthly" data-key="monthly">Monthly</option>
+          <option value="yearly" data-key="yearly">Yearly</option>
         </select>
 
-        <label for="create-target-members" class="sr-only">
-          <span class="lang-en">Target Members</span>
-          <span class="lang-am" style="display:none;">የአባላት ቁጥር</span>
-        </label>
-        <input id="create-target-members" type="number" class="form-field" min="2"/>
+        <label for="create-target-members" class="form-label" data-key="targetMembers">Target Members</label>
+        <input id="create-target-members" type="number" class="form-field" min="2" placeholder="Minimum 2 members"/>
 
-        <label for="create-goal-amount" class="sr-only">
-          <span class="lang-en">Goal Amount (ETB)</span>
-          <span class="lang-am" style="display:none;">የግብ መጠን (ብር)</span>
-        </label>
-        <input id="create-goal-amount" type="number" class="form-field" min="1"/>
+        <label for="create-goal-amount" class="form-label" data-key="goalAmount">Goal Amount (ETB)</label>
+        <input id="create-goal-amount" type="number" class="form-field" min="1" placeholder="Enter goal amount"/>
 
-        <label for="create-contribution-amount" class="sr-only">
-          <span class="lang-en">Contribution (ETB)</span>
-          <span class="lang-am" style="display:none;">አስተዋጽኦ (ብር)</span>
-        </label>
-        <input id="create-contribution-amount" type="number" class="form-field" min="0" step="0.01"/>
+        <label for="create-contribution-amount" class="form-label" data-key="contribution">Contribution (ETB)</label>
+        <input id="create-contribution-amount" type="number" class="form-field" min="0" step="0.01" placeholder="Auto-calculated"/>
 
-        <label for="create-start-date" class="sr-only">
-          <span class="lang-en">Start Date</span>
-          <span class="lang-am" style="display:none;">መጀመሪያ ቀን</span>
-        </label>
+        <div class="auto-calculation-notice">
+          <span data-key="autoCalculation">Contribution will be auto-calculated as: Goal Amount ÷ Target Members</span>
+        </div>
+
+        <label for="create-start-date" class="form-label" data-key="startDate">Start Date</label>
         <input id="create-start-date" type="date" class="form-field"/>
 
         <div class="modal-buttons">
           <button class="glass-button" type="button" onclick="createEqub()">
-            <span class="lang-en">Create</span>
-            <span class="lang-am" style="display:none;">ፍጠር</span>
+            <span data-key="create">Create</span>
           </button>
           <button class="glass-button secondary" type="button" onclick="closeModal('create-equb')">
-            <span class="lang-en">Cancel</span>
-            <span class="lang-am" style="display:none;">ሰርዝ</span>
+            <span data-key="cancel">Cancel</span>
           </button>
         </div>
       </div>
@@ -360,72 +316,37 @@
     <!-- Edit Equb -->
     <div id="edit-equb-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-title">
       <div class="modal-content">
-        <h2 id="edit-title">
-          <span class="lang-en">Edit Equb</span>
-          <span class="lang-am" style="display:none;">እቁብ አስተካክል</span>
-        </h2>
+        <h2 id="edit-title" data-key="editEqub">Edit Equb</h2>
 
-        <label for="edit-equb-name" class="sr-only">
-          <span class="lang-en">Equb Name</span>
-          <span class="lang-am" style="display:none;">የእቁብ ስም</span>
-        </label>
-        <input id="edit-equb-name" class="form-field"/>
+        <label for="edit-equb-name" class="form-label" data-key="equbName">Equb Name</label>
+        <input id="edit-equb-name" class="form-field" placeholder="Enter equb name"/>
 
-        <label for="edit-equb-frequency" class="sr-only">
-          <span class="lang-en">Frequency</span>
-          <span class="lang-am" style="display:none;">ድግግሞሽ</span>
-        </label>
+        <label for="edit-equb-frequency" class="form-label" data-key="frequency">Frequency</label>
         <select id="edit-equb-frequency" class="form-field">
-          <option value="daily">
-            <span class="lang-en">Daily</span>
-            <span class="lang-am" style="display:none;">በየቀኑ</span>
-          </option>
-          <option value="weekly">
-            <span class="lang-en">Weekly</span>
-            <span class="lang-am" style="display:none;">በሳምንት</span>
-          </option>
-          <option value="monthly">
-            <span class="lang-en">Monthly</span>
-            <span class="lang-am" style="display:none;">በወር</span>
-          </option>
-          <option value="yearly">
-            <span class="lang-en">Yearly</span>
-            <span class="lang-am" style="display:none;">በዓመት</span>
-          </option>
+          <option value="daily" data-key="daily">Daily</option>
+          <option value="weekly" data-key="weekly">Weekly</option>
+          <option value="monthly" data-key="monthly">Monthly</option>
+          <option value="yearly" data-key="yearly">Yearly</option>
         </select>
 
-        <label for="edit-target-members" class="sr-only">
-          <span class="lang-en">Target Members</span>
-          <span class="lang-am" style="display:none;">የአባላት ቁጥር</span>
-        </label>
-        <input id="edit-target-members" type="number" class="form-field" min="2"/>
+        <label for="edit-target-members" class="form-label" data-key="targetMembers">Target Members</label>
+        <input id="edit-target-members" type="number" class="form-field" min="2" placeholder="Minimum 2 members"/>
 
-        <label for="edit-goal-amount" class="sr-only">
-          <span class="lang-en">Goal Amount (ETB)</span>
-          <span class="lang-am" style="display:none;">የግብ መጠን (ብር)</span>
-        </label>
-        <input id="edit-goal-amount" type="number" class="form-field" min="1"/>
+        <label for="edit-goal-amount" class="form-label" data-key="goalAmount">Goal Amount (ETB)</label>
+        <input id="edit-goal-amount" type="number" class="form-field" min="1" placeholder="Enter goal amount"/>
 
-        <label for="edit-contribution-amount" class="sr-only">
-          <span class="lang-en">Contribution (ETB)</span>
-          <span class="lang-am" style="display:none;">አስተዋጽኦ (ብር)</span>
-        </label>
-        <input id="edit-contribution-amount" type="number" class="form-field" min="0" step="0.01"/>
+        <label for="edit-contribution-amount" class="form-label" data-key="contribution">Contribution (ETB)</label>
+        <input id="edit-contribution-amount" type="number" class="form-field" min="0" step="0.01" placeholder="Enter contribution amount"/>
 
-        <label for="edit-start-date" class="sr-only">
-          <span class="lang-en">Start Date</span>
-          <span class="lang-am" style="display:none;">መጀመሪያ ቀን</span>
-        </label>
+        <label for="edit-start-date" class="form-label" data-key="startDate">Start Date</label>
         <input id="edit-start-date" type="date" class="form-field"/>
 
         <div class="modal-buttons">
           <button class="glass-button" type="button" onclick="saveEditEqub()">
-            <span class="lang-en">Save</span>
-            <span class="lang-am" style="display:none;">አስቀምጥ</span>
+            <span data-key="save">Save</span>
           </button>
           <button class="glass-button secondary" type="button" onclick="closeModal('edit-equb')">
-            <span class="lang-en">Cancel</span>
-            <span class="lang-am" style="display:none;">ሰርዝ</span>
+            <span data-key="cancel">Cancel</span>
           </button>
         </div>
       </div>
@@ -434,25 +355,17 @@
     <!-- Join Equb -->
     <div id="join-equb-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="join-title">
       <div class="modal-content">
-        <h2 id="join-title">
-          <span class="lang-en">Join Equb</span>
-          <span class="lang-am" style="display:none;">እቁብ ተቀላቀል</span>
-        </h2>
+        <h2 id="join-title" data-key="joinEqub">Join Equb</h2>
 
-        <label for="equb-code" class="sr-only">
-          <span class="lang-en">Enter Code (EQ-XXXX-2025)</span>
-          <span class="lang-am" style="display:none;">ኮድ አስገባ (EQ-XXXX-2025)</span>
-        </label>
-        <input id="equb-code" class="form-field" inputmode="text"/>
+        <label for="equb-code" class="form-label" data-key="joinCode">Enter Code (EQ-XXXX-2025)</label>
+        <input id="equb-code" class="form-field" inputmode="text" placeholder="EQ-XXXX-2025"/>
 
         <div class="modal-buttons">
           <button class="glass-button" type="button" onclick="joinEqub()">
-            <span class="lang-en">Join</span>
-            <span class="lang-am" style="display:none;">ተቀላቀል</span>
+            <span data-key="join">Join</span>
           </button>
           <button class="glass-button secondary" type="button" onclick="closeModal('join-equb')">
-            <span class="lang-en">Cancel</span>
-            <span class="lang-am" style="display:none;">ሰርዝ</span>
+            <span data-key="cancel">Cancel</span>
           </button>
         </div>
       </div>
@@ -461,20 +374,16 @@
     <!-- Invite -->
     <div id="invite-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="invite-title">
       <div class="modal-content" style="text-align:center;">
-        <h2 id="invite-title">
-          <span class="lang-en">Invite to Equb</span>
-          <span class="lang-am" style="display:none;">ወደ እቁብ ጋብዝ</span>
-        </h2>
-        <p id="share-code"></p>
+        <h2 id="invite-title" data-key="invite">Invite to Equb</h2>
+        <br>
+        <p id="share-code" data-key="shareCode">Share this code:</p>
         <code id="invite-code" style="display:block;margin:10px 0;padding:8px;background:rgba(0,0,0,.2);border-radius:8px;"></code>
         <div class="modal-buttons">
           <button class="glass-button" type="button" onclick="copyInviteCode()">
-            <span class="lang-en">Copy</span>
-            <span class="lang-am" style="display:none;">ቅዳ</span>
+            <span data-key="copy">Copy</span>
           </button>
           <button class="glass-button secondary" type="button" onclick="closeModal('invite')">
-            <span class="lang-en">Close</span>
-            <span class="lang-am" style="display:none;">ዝጋ</span>
+            <span data-key="close">Close</span>
           </button>
         </div>
       </div>
@@ -483,44 +392,30 @@
     <!-- Contribute -->
     <div id="contribute-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="contribute-title">
       <div class="modal-content">
-        <h2 id="contribute-title">
-          <span class="lang-en">Contribute</span>
-          <span class="lang-am" style="display:none;">አስተዋጽኦ አድርግ</span>
-        </h2>
+        <h2 id="contribute-title" data-key="contribute">Contribute</h2>
 
-        <label for="contribution-member" class="sr-only">
-          <span class="lang-en">Select Member</span>
-          <span class="lang-am" style="display:none;">አባል ምረጥ</span>
-        </label>
+        <label for="contribution-member" class="form-label" data-key="selectMember">Select Member</label>
         <select id="contribution-member" class="form-field"></select>
 
         <div id="required-amount-display" style="margin:10px 0;padding:10px;background:rgba(255,255,255,.1);border-radius:10px;display:none;">
           <p>
-            <span class="lang-en">Required:</span>
-            <span class="lang-am" style="display:none;">የሚፈለገው፡</span>
+            <span data-key="required">Required:</span>
             <span id="required-amount"></span> 
-            <span class="lang-en">ETB (includes</span>
-            <span class="lang-am" style="display:none;">ብር (ያካትታል</span>
+            <span data-key="ETB">ETB (includes</span>
             <span id="missed-count"></span>
-            <span class="lang-en">missed days)</span>
-            <span class="lang-am" style="display:none;">የተባለሉ ቀናት)</span>
+            <span data-key="missedDays">missed days)</span>
           </p>
         </div>
 
-        <label for="contribute-amount" class="sr-only">
-          <span class="lang-en">Amount (ETB)</span>
-          <span class="lang-am" style="display:none;">መጠን (ብር)</span>
-        </label>
-        <input id="contribute-amount" type="number" class="form-field" min="0" step="0.01"/>
+        <label for="contribute-amount" class="form-label" data-key="amount">Amount (ETB)</label>
+        <input id="contribute-amount" type="number" class="form-field" min="0" step="0.01" placeholder="Enter amount"/>
 
         <div class="modal-buttons">
-          <button class="glass-button" type="button" onclick="contribute()">
-            <span class="lang-en">Pay</span>
-            <span class="lang-am" style="display:none;">ክፈል</span>
+          <button class="glass-button" type="button" onclick="contribute()" id="contribute-submit">
+            <span data-key="pay">Pay</span>
           </button>
           <button class="glass-button secondary" type="button" onclick="closeModal('contribute')">
-            <span class="lang-en">Cancel</span>
-            <span class="lang-am" style="display:none;">ሰርዝ</span>
+            <span data-key="cancel">Cancel</span>
           </button>
         </div>
       </div>
@@ -529,35 +424,24 @@
     <!-- Add Member -->
     <div id="add-member-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="add-member-title">
       <div class="modal-content">
-        <h2 id="add-member-title">
-          <span class="lang-en">Add Member</span>
-          <span class="lang-am" style="display:none;">አባል ጨምር</span>
-        </h2>
+        <h2 id="add-member-title" data-key="addMember">Add Member</h2>
 
         <div class="form-row">
-          <label for="add-member-name">
-            <span class="lang-en">Member Name</span>
-            <span class="lang-am" style="display:none;">የአባል ስም</span>
-          </label>
-          <input id="add-member-name" class="form-field" autocomplete="name"/>
+          <label for="add-member-name" class="form-label" data-key="memberName">Member Name</label>
+          <input id="add-member-name" class="form-field" autocomplete="name" placeholder="Enter member name"/>
         </div>
 
         <div class="form-row">
-          <label for="add-member-phone">
-            <span class="lang-en">Phone Number</span>
-            <span class="lang-am" style="display:none;">ስልክ ቁጥር</span>
-          </label>
-          <input id="add-member-phone" class="form-field" type="tel" autocomplete="tel"/>
+          <label for="add-member-phone" class="form-label" data-key="phone">Phone Number</label>
+          <input id="add-member-phone" class="form-field" type="tel" autocomplete="tel" placeholder="Enter phone number"/>
         </div>
 
         <div class="modal-buttons">
           <button class="glass-button" type="button" onclick="addMember()">
-            <span class="lang-en">Add</span>
-            <span class="lang-am" style="display:none;">ጨምር</span>
+            <span data-key="add">Add</span>
           </button>
           <button class="glass-button secondary" type="button" onclick="closeModal('add-member')">
-            <span class="lang-en">Cancel</span>
-            <span class="lang-am" style="display:none;">ሰርዝ</span>
+            <span data-key="cancel">Cancel</span>
           </button>
         </div>
       </div>
@@ -566,31 +450,20 @@
     <!-- Edit Member -->
     <div id="edit-member-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-member-title">
       <div class="modal-content">
-        <h2 id="edit-member-title">
-          <span class="lang-en">Edit Member</span>
-          <span class="lang-am" style="display:none;">አባል አስተካክል</span>
-        </h2>
+        <h2 id="edit-member-title" data-key="editMember">Edit Member</h2>
 
-        <label for="edit-member-name" class="sr-only">
-          <span class="lang-en">Member Name</span>
-          <span class="lang-am" style="display:none;">የአባል ስም</span>
-        </label>
-        <input id="edit-member-name" class="form-field" autocomplete="name"/>
+        <label for="edit-member-name" class="form-label" data-key="memberName">Member Name</label>
+        <input id="edit-member-name" class="form-field" autocomplete="name" placeholder="Enter member name"/>
 
-        <label for="edit-member-phone" class="sr-only">
-          <span class="lang-en">Phone Number</span>
-          <span class="lang-am" style="display:none;">ስልክ ቁጥር</span>
-        </label>
-        <input id="edit-member-phone" class="form-field" type="tel" autocomplete="tel"/>
+        <label for="edit-member-phone" class="form-label" data-key="phone">Phone Number</label>
+        <input id="edit-member-phone" class="form-field" type="tel" autocomplete="tel" placeholder="Enter phone number"/>
 
         <div class="modal-buttons">
           <button class="glass-button" type="button" onclick="saveEditMember()">
-            <span class="lang-en">Save</span>
-            <span class="lang-am" style="display:none;">አስቀምጥ</span>
+            <span data-key="save">Save</span>
           </button>
           <button class="glass-button secondary" type="button" onclick="closeModal('edit-member')">
-            <span class="lang-en">Cancel</span>
-            <span class="lang-am" style="display:none;">ሰርዝ</span>
+            <span data-key="cancel">Cancel</span>
           </button>
         </div>
       </div>
@@ -599,25 +472,17 @@
     <!-- Payout Modal -->
     <div id="payout-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="payout-title">
       <div class="modal-content">
-        <h2 id="payout-title">
-          <span class="lang-en">Payout Round</span>
-          <span class="lang-am" style="display:none;">ዙር ይክፈሉ</span>
-        </h2>
+        <h2 id="payout-title" data-key="payout">Payout Round</h2>
 
-        <label for="payout-recipient" class="sr-only">
-          <span class="lang-en">Select Recipient</span>
-          <span class="lang-am" style="display:none;">ተቀባይ ይምረጡ</span>
-        </label>
+        <label for="payout-recipient" class="form-label" data-key="selectRecipient">Select Recipient</label>
         <select id="payout-recipient" class="form-field"></select>
 
         <div class="modal-buttons">
-          <button class="glass-button" type="button" onclick="performPayout()">
-            <span class="lang-en">Payout</span>
-            <span class="lang-am" style="display:none;">ይክፈሉ</span>
+          <button class="glass-button" type="button" onclick="performPayout()" id="payout-submit">
+            <span data-key="payout">Payout</span>
           </button>
           <button class="glass-button secondary" type="button" onclick="closeModal('payout')">
-            <span class="lang-en">Cancel</span>
-            <span class="lang-am" style="display:none;">ሰርዝ</span>
+            <span data-key="cancel">Cancel</span>
           </button>
         </div>
       </div>
@@ -626,64 +491,19 @@
     <!-- Edit Payout Order Modal -->
     <div id="edit-payout-order-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-payout-order-title">
       <div class="modal-content">
-        <h2 id="edit-payout-order-title">
-          <span class="lang-en">Edit Payout Order</span>
-          <span class="lang-am" style="display:none;">የክፍያ ቅደም ተከተል ያርትዑ</span>
-        </h2>
-        <p style="margin-bottom: 16px; opacity: 0.8;">
-          <span class="lang-en">Drag items or use buttons to reorder</span>
-          <span class="lang-am" style="display:none;">ንጥሎችን ይጎትቱ ወይም ለማስተካከል ቁልፎችን ይጠቀሙ</span>
+        <h2 id="edit-payout-order-title" data-key="editPayoutOrder">Edit Payout Order</h2>
+        <p style="margin-bottom: 16px; opacity: 0.8;" data-key="dragReorder">
+          Drag items or use buttons to reorder
         </p>
         <div id="payout-order-list" class="payout-order-list" role="list"></div>
         <div class="modal-buttons">
           <button class="glass-button" type="button" onclick="savePayoutOrder()">
-            <span class="lang-en">Save</span>
-            <span class="lang-am" style="display:none;">አስቀምጥ</span>
+            <span data-key="save">Save</span>
           </button>
           <button class="glass-button secondary" type="button" onclick="closeModal('edit-payout-order')">
-            <span class="lang-en">Cancel</span>
-            <span class="lang-am" style="display:none;">ሰርዝ</span>
+            <span data-key="cancel">Cancel</span>
           </button>
         </div>
-      </div>
-    </div>
-
-    <!-- Confirm Modal (for Remove) -->
-    <div id="confirm-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-      <div class="modal-content confirm-modal">
-        <h2 id="confirm-title">
-          <span class="lang-en">Confirm</span>
-          <span class="lang-am" style="display:none;">አረጋግጥ</span>
-        </h2>
-        <p id="confirm-message">
-          <span class="lang-en">Are you sure you want to remove this member?</span>
-          <span class="lang-am" style="display:none;">ይህን አባል ለማስወገድ እርግጠኛ ነዎት?</span>
-        </p>
-        <div class="modal-buttons">
-          <button class="glass-button" id="confirm-yes">
-            <span class="lang-en">Yes</span>
-            <span class="lang-am" style="display:none;">አዎ</span>
-          </button>
-          <button class="glass-button secondary" id="confirm-no">
-            <span class="lang-en">No</span>
-            <span class="lang-am" style="display:none;">አይ</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- QR Join -->
-    <div id="qr-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="qr-title">
-      <div class="modal-content" style="text-align:center;">
-        <h2 id="qr-title">
-          <span class="lang-en">Join via QR</span>
-          <span class="lang-am" style="display:none;">በQR ተቀላቀል</span>
-        </h2>
-        <canvas id="qr-canvas" style="margin:15px auto;" aria-hidden="true"></canvas>
-        <button class="glass-button secondary" type="button" onclick="closeModal('qr')">
-          <span class="lang-en">Close</span>
-          <span class="lang-am" style="display:none;">ዝጋ</span>
-        </button>
       </div>
     </div>
 
@@ -691,28 +511,23 @@
     <nav class="nav-bar" id="nav-bar" style="display:none;" aria-label="Bottom navigation">
       <a class="nav-item" data-page="home" onclick="showPage('home')" aria-label="Home">
         <span class="material-symbols-rounded nav-icon" aria-hidden="true">home</span>
-        <span class="nav-text lang-en">Home</span>
-        <span class="nav-text lang-am" style="display:none;">ዋና</span>
+        <span class="nav-text" data-key="home">Home</span>
       </a>
       <a class="nav-item" data-page="myequbs" onclick="showPage('myequbs')" aria-label="My Equbs">
         <span class="material-symbols-rounded nav-icon" aria-hidden="true">account_balance</span>
-        <span class="nav-text lang-en">My Equbs</span>
-        <span class="nav-text lang-am" style="display:none;">የእኔ እቁቦች</span>
+        <span class="nav-text" data-key="myEqubs">My Equbs</span>
       </a>
       <a class="nav-item" data-page="members" onclick="showPage('members')" aria-label="Members">
         <span class="material-symbols-rounded nav-icon" aria-hidden="true">people</span>
-        <span class="nav-text lang-en">Members</span>
-        <span class="nav-text lang-am" style="display:none;">አባላት</span>
+        <span class="nav-text" data-key="members">Members</span>
       </a>
       <a class="nav-item" data-page="activity" onclick="showPage('activity')" aria-label="Activity">
         <span class="material-symbols-rounded nav-icon" aria-hidden="true">history</span>
-        <span class="nav-text lang-en">Activity</span>
-        <span class="nav-text lang-am" style="display:none;">እንቅስቃሴ</span>
+        <span class="nav-text" data-key="activity">Activity</span>
       </a>
       <a class="nav-item" data-page="profile" onclick="showPage('profile')" aria-label="Profile">
         <span class="material-symbols-rounded nav-icon" aria-hidden="true">person</span>
-        <span class="nav-text lang-en">Profile</span>
-        <span class="nav-text lang-am" style="display:none;">መለያ</span>
+        <span class="nav-text" data-key="profile">Profile</span>
       </a>
     </nav>
   </div>
