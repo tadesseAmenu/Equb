@@ -512,6 +512,9 @@ function getText(key, ...args) {
     memberEdited: { en: "Member edited!", am: "አባል ተስተካክሏል!" },
     paidSuccess: { en: "Paid!", am: "ተከፍሏል!" },
     goalReached: { en: "Goal reached! 100%", am: "ግቡ ተደረሰ! 100%" },
+    restartEqub: { en: "Restart Equb", am: "እቁብ እንደገና ጀምር" },
+restartConfirm: { en: "Restart this Equb? This will reset all progress", am: "ይህን እቁብ እንደገና ለመጀመር እርግጠኛ ነህ? ይህ ሁሉም እድገት ዳግም ይጀምራል" },
+equbRestarted: { en: "Equb restarted!", am: "እቁብ እንደገና ተጀመረ!" },
 
     addMember: { en: "Add Member", am: "አባል ጨምር" },
     editMember: { en: "Edit Member", am: "አባል አስተካክል" },
@@ -547,7 +550,9 @@ function getText(key, ...args) {
     up: { en: "Up", am: "ወደ ላይ" },
     down: { en: "Down", am: "ወደ ታች" },
     explore: { en: "Explore", am: "ያስሱ" },
+    
     settings: { en: "Settings", am: "ቅንብሮች" }
+    
   };
 
   const text = translations[key]?.[lang] || key;
@@ -1959,8 +1964,62 @@ function performPayout() {
   closeModal('payout');
   updateHome();
   updateMembers();
+  showRestartButton();
+
 }
 
+/* ---------------------------------------------------------------------
+   Restart Equb Functionality - NEW
+   --------------------------------------------------------------------- */
+function showRestartButton() {
+  const equb = getCurrentEqub();
+  if (!equb) return false;
+  
+  const totalPayouts = equb.payoutHistory?.length || 0;
+  const totalMembers = equb.targetMembers || 1;
+  
+  // Show restart button only when ALL members have received at least one payout
+  // and the equb is marked as completed
+  const shouldShow = equb.status === 'completed' && totalPayouts >= totalMembers;
+  
+  const restartBtn = el('restart-button');
+  if (restartBtn) {
+    restartBtn.style.display = shouldShow ? 'block' : 'none';
+  }
+  
+  return shouldShow;
+}
+
+function restartEqub() {
+  const equb = getCurrentEqub();
+  if (!equb || equb.creatorId !== state.user?.id) {
+    return alert('Only the equb creator can restart the equb');
+  }
+  
+  if (!confirm('Are you sure you want to restart this equb? This will reset all progress and start a new cycle.')) {
+    return;
+  }
+  
+  // Reset equb to active status with fresh start
+  equb.status = 'active';
+  equb.progress = 0;
+  equb.celebrated = false;
+  equb.currentPayoutIndex = 0;
+  
+  // Clear payout history and contributions for fresh start
+  equb.payoutHistory = [];
+  equb.contributions = [];
+  
+  // Generate new payout order
+  equb.payoutOrder = shuffleArray(equb.members.map(m => ({ ...m })));
+  
+  pushActivity(`🔄 Equb "${equb.name}" restarted by ${state.user.name}`, equb.id);
+  saveState();
+  
+  success('Equb restarted successfully! Ready for new contributions.');
+  updateHome();
+  updateMembers();
+}
 /* ---------------------------------------------------------------------
    Payout Order Management (Drag & Drop) - FIXED MISSING FUNCTIONS
    --------------------------------------------------------------------- */
@@ -2206,6 +2265,8 @@ function updateHome() {
   
   // CRITICAL FIX: Update payment status section for ALL frequencies
   updatePaymentStatus(equb);
+  showRestartButton();
+
 }
 
 
