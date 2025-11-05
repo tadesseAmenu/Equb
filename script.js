@@ -1991,13 +1991,76 @@ function showRestartButton() {
 }
 
 function restartEqub() {
+  showConfirmation('restartEqub');
+}
+
+// Add this case to the showConfirmation function
+function showConfirmation(action, data = null) {
+  const dialog = el('confirmation-dialog');
+  const title = el('confirmation-title');
+  const message = el('confirmation-message');
+  const yesBtn = el('confirmation-yes');
+  const noBtn = el('confirmation-no');
+  
+  if (!dialog || !title || !message || !yesBtn || !noBtn) return;
+  
+  // Set confirmation content based on action
+  switch(action) {
+    case 'logout':
+      title.textContent = getText('confirm');
+      message.textContent = getText('logoutConfirm');
+      break;
+    case 'deleteEqub':
+      title.textContent = getText('confirm');
+      message.textContent = getText('deleteConfirm');
+      break;
+    case 'removeMember':
+      title.textContent = getText('confirm');
+      message.textContent = getText('removeMemberConfirm');
+      break;
+    case 'restartEqub': // NEW CASE
+      title.textContent = getText('confirm');
+      message.textContent = getText('restartConfirm');
+      break;
+    default:
+      title.textContent = getText('confirm');
+      message.textContent = getText('confirmAction');
+  }
+  
+  // Set up confirmation callback
+  confirmationCallback = (confirmed) => {
+    if (confirmed) {
+      switch(action) {
+        case 'logout':
+          performLogout();
+          break;
+        case 'deleteEqub':
+          performDeleteEqub(data);
+          break;
+        case 'removeMember':
+          performRemoveMember(data);
+          break;
+        case 'restartEqub': // NEW CASE
+          performRestartEqub();
+          break;
+      }
+    }
+    hideConfirmation();
+  };
+  
+  // Show dialog
+  dialog.classList.remove('hidden');
+  
+  // Set up button handlers
+  yesBtn.onclick = () => confirmationCallback(true);
+  noBtn.onclick = () => confirmationCallback(false);
+}
+
+// Add this new function to handle the actual restart
+function performRestartEqub() {
   const equb = getCurrentEqub();
   if (!equb || equb.creatorId !== state.user?.id) {
     return alert('Only the equb creator can restart the equb');
-  }
-  
-  if (!confirm('Are you sure you want to restart this equb? This will reset all progress and start a new cycle.')) {
-    return;
   }
   
   // Reset equb to active status with fresh start
@@ -2016,7 +2079,7 @@ function restartEqub() {
   pushActivity(`🔄 Equb "${equb.name}" restarted by ${state.user.name}`, equb.id);
   saveState();
   
-  success('Equb restarted successfully! Ready for new contributions.');
+  success(getText('equbRestarted'));
   updateHome();
   updateMembers();
 }
