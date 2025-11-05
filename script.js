@@ -432,7 +432,7 @@ function getText(key, ...args) {
     todayPayments: { en: "Today's Payments", am: "የዛሬ ክፍያዎች" },
     paid: { en: "Paid", am: "ተከፍሏል" },
     notPaid: { en: "Not Paid", am: "አልተከፈለም" },
-    completeProgress: { en: "Complete 100% progress to enable payments", am: "ክፍያዎችን ለማንቃት 100% እድገት ያጠናቅቁ" },
+    completeProgress: { en: "Complete 100% progress to enable payments", am: "ክፍያዎችን ለማንቃት 100% ያጠናቅቁ" },
 
     noEqubs: { en: "No Equbs yet — create or join one", am: "እቁብ የለም — ፍጠር ወይም ተቀላቀል" },
     createEqub: { en: "Create Equb", am: "እቁብ ፍጠር" },
@@ -879,11 +879,14 @@ function addMember() {
   const equb = getCurrentEqub();
   if (!equb || equb.creatorId !== state.user.id) return alert(getText('onlyCreator'));
   
-  // FIXED: Allow adding members if equb is forming OR active but not full
+  // FIXED: Enhanced validation
   if (equb.status === 'completed') return alert(getText('completed'));
   if (equb.members.length >= equb.targetMembers) return alert(getText('equbFull'));
   if (equb.members.some(m => m.name.toLowerCase() === name.toLowerCase())) {
     return alert('Member with this name already exists');
+  }
+  if (equb.members.some(m => m.phone === phone)) {
+    return alert('Member with this phone number already exists');
   }
 
   const newMember = { 
@@ -895,11 +898,21 @@ function addMember() {
   
   equb.members.push(newMember);
   
-  // Auto-activate if full
+  // FIXED: Enhanced auto-activation logic
   if (equb.members.length === equb.targetMembers && equb.status === 'forming') {
     equb.status = 'active';
-    equb.payoutOrder = shuffleArray(equb.members.map(m => ({ ...m })));
-    pushActivity(`Equb "${equb.name}" is now active! All members joined.`, equb.id);
+    
+    // Initialize payout order if not set
+    if (!equb.payoutOrder || equb.payoutOrder.length === 0) {
+      equb.payoutOrder = shuffleArray(equb.members.map(m => ({ ...m })));
+    }
+    
+    pushActivity(`Equb "${equb.name}" is now active! All ${equb.targetMembers} members have joined.`, equb.id);
+    success(`Equb is now active with ${equb.targetMembers} members! Start making contributions.`);
+  } else if (equb.members.length < equb.targetMembers && equb.status === 'forming') {
+    // Still forming - show remaining members needed
+    const remaining = equb.targetMembers - equb.members.length;
+    success(`Member added! ${remaining} more members needed to activate equb.`);
   }
   
   pushActivity(`${name} added by ${state.user.name}`, equb.id);
@@ -1032,36 +1045,101 @@ function contribute() {
   const missed = computeMemberMissedCycles(equb, member);
   const required = equb.contributionAmount + missed * equb.contributionAmount;
   
-  // FIXED: Allow admin to accept any amount, but warn if less than required
+  // Allow admin to accept any amount, but warn if less than required
   if (amount < required) {
     const confirmMsg = `You are paying ${formatCurrency(amount)} ETB, but ${member.name} owes ${formatCurrency(required)} ETB. Continue anyway?`;
     if (!confirm(confirmMsg)) return;
   }
   
-  const today = toDateOnlyString(new Date());
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
   
-  // Check if already paid today for daily equbs
-  if (equb.frequency === 'daily') {
-    const alreadyPaid = (equb.contributions || []).some(c => 
-      c.userId === memberId && toDateOnlyString(c.date) === today
-    );
-    
-    if (alreadyPaid) {
-      return alert(`${member.name} has already paid today`);
+  // FIXED: Check if already paid in current cycle for all frequencies
+  const payoutHistory = equb.payoutHistory || [];
+  const totalMembers = equb.targetMembers || 1;
+  const currentCycle = Math.floor(payoutHistory.length / totalMembers);
+  
+  // Get contributions for current cycle only
+  const currentCycleContributions = (equb.contributions || []).filter(c => {
+    if (c.cycleUsed !== undefined) {
+      return c.cycleUsed === currentCycle;
     }
+    // For contributions without cycle tracking, only include if they are after the last payout
+    if (payoutHistory.length > 0) {
+      const lastPayoutDate = new Date(payoutHistory[payoutHistory.length - 1].date);
+      const contributionDate = new Date(c.date);
+      return contributionDate > lastPayoutDate;
+    }
+    // No payouts yet, include all contributions
+    return true;
+  });
+
+  // Check for duplicate payments in current cycle based on frequency
+  let alreadyPaid = false;
+  
+  switch (equb.frequency) {
+    case 'daily':
+      // For daily, check if paid today
+      alreadyPaid = currentCycleContributions.some(c => 
+        c.userId === memberId && toDateOnlyString(c.date) === toDateOnlyString(today)
+      );
+      break;
+      
+    case 'weekly':
+      // For weekly, check if paid this week (same week number)
+      const thisWeek = getWeekNumber(today);
+      alreadyPaid = currentCycleContributions.some(c => {
+        if (c.userId !== memberId) return false;
+        const contributionDate = new Date(c.date);
+        const contributionWeek = getWeekNumber(contributionDate);
+        return contributionWeek === thisWeek;
+      });
+      break;
+      
+    case 'monthly':
+      // For monthly, check if paid this month
+      const thisMonth = today.getMonth();
+      const thisYear = today.getFullYear();
+      alreadyPaid = currentCycleContributions.some(c => {
+        if (c.userId !== memberId) return false;
+        const contributionDate = new Date(c.date);
+        return contributionDate.getMonth() === thisMonth && 
+               contributionDate.getFullYear() === thisYear;
+      });
+      break;
+      
+    case 'yearly':
+      // For yearly, check if paid this year
+      const thisYearOnly = today.getFullYear();
+      alreadyPaid = currentCycleContributions.some(c => {
+        if (c.userId !== memberId) return false;
+        const contributionDate = new Date(c.date);
+        return contributionDate.getFullYear() === thisYearOnly;
+      });
+      break;
+  }
+  
+  if (alreadyPaid) {
+    const frequencyText = getText(equb.frequency);
+    return alert(`${member.name} has already paid this ${frequencyText.toLowerCase()} in the current cycle`);
   }
 
   equb.contributions = equb.contributions || [];
-  equb.contributions.push({ 
+  
+  // Set cycle tracking for new contributions
+  const newContribution = { 
     amount, 
     userId: memberId, 
     date: new Date().toISOString(),
-    memberName: member.name
-  });
+    memberName: member.name,
+    cycleUsed: currentCycle // Track which cycle this contribution belongs to
+  };
+  
+  equb.contributions.push(newContribution);
   
   pushActivity(`${member.name} paid ${formatCurrency(amount)} ETB`, equb.id);
 
-  // FIXED: Update progress based on ACTUAL total collected vs goal
+  // Update progress based on ACTUAL total collected vs goal
   updateEqubProgress(equb);
   
   saveState();
@@ -1081,35 +1159,516 @@ function contribute() {
   }
 }
 
-// FIXED: Proper progress calculation
+
+
+// FIXED: Enhanced progress calculation for proper payout cycles with COMPLETE RESET
 function updateEqubProgress(equb) {
   if (!equb) return;
   
-  // Calculate total actually collected from all contributions
-  const totalCollected = (equb.contributions || []).reduce((sum, c) => sum + (c.amount || 0), 0);
+  // Calculate current cycle based on payout history
+  const payoutHistory = equb.payoutHistory || [];
+  const totalMembers = equb.targetMembers || 1;
+  const currentCycle = Math.floor(payoutHistory.length / totalMembers);
   
-  // Progress is based on actual collected amount vs goal
-  equb.progress = equb.goalAmount ? Math.min(100, (totalCollected / equb.goalAmount) * 100) : 0;
+  // Calculate total collected in CURRENT CYCLE only
+  let totalCollectedThisCycle = 0;
   
-  // Auto-activate equb if we reach target members and have some progress
-  if (equb.status === 'forming' && equb.members.length >= equb.targetMembers && equb.progress > 0) {
+  // Only count contributions from the current cycle
+  const currentCycleContributions = (equb.contributions || []).filter(c => {
+    if (c.cycleUsed !== undefined) {
+      return c.cycleUsed === currentCycle;
+    }
+    // For contributions without cycle tracking, only include if they are after the last payout
+    if (payoutHistory.length > 0) {
+      const lastPayoutIndex = payoutHistory.length - 1;
+      const lastPayoutDate = new Date(payoutHistory[lastPayoutIndex].date);
+      const contributionDate = new Date(c.date);
+      return contributionDate > lastPayoutDate;
+    }
+    // No payouts yet, include all contributions
+    return true;
+  });
+  
+  totalCollectedThisCycle = currentCycleContributions.reduce((sum, c) => sum + (c.amount || 0), 0);
+  
+  // Progress is based on current cycle collections vs goal
+  equb.progress = equb.goalAmount ? Math.min(100, (totalCollectedThisCycle / equb.goalAmount) * 100) : 0;
+  
+  // Status logic
+  if (equb.status === 'completed') {
+    // Once completed, stay completed
+    return;
+  }
+  
+  // Auto-activate equb if we reach target members AND have at least one payment
+  if (equb.status === 'forming' && 
+      equb.members.length >= equb.targetMembers && 
+      totalCollectedThisCycle > 0) {
     equb.status = 'active';
-    pushActivity(`Equb "${equb.name}" is now active!`, equb.id);
+    pushActivity(`🎊 Equb "${equb.name}" is now active! All members joined and payments started.`, equb.id);
+  }
+  
+  // MARK: Auto-start new round after completing a full rotation (after every full round of payouts)
+  const totalPayouts = payoutHistory.length;
+  if (totalPayouts > 0 && totalPayouts % totalMembers === 0 && equb.status === 'active') {
+    // Reset for new round: reshuffle payout order, reset current index, reset celebrated flag
+    equb.payoutOrder = shuffleArray(equb.members.map(m => ({ ...m })));
+    equb.currentPayoutIndex = 0;
+    equb.celebrated = false; // Allow celebration for new round
+    
+    // Only reset progress if it's not already 0 (prevents multiple resets)
+    if (equb.progress > 0) {
+      equb.progress = 0; // Explicitly reset progress for new round start
+      pushActivity(`🔄 New round started for "${equb.name}"! Payout order refreshed and progress reset to 0%.`, equb.id);
+      success('New round started! Continue contributing for the next cycle.');
+    } else {
+      pushActivity(`🔄 New round ready for "${equb.name}"! Payout order refreshed.`, equb.id);
+    }
   }
 }
 
-// FIXED: Check if all members are paid up (no missed payments)
+/* ---------------------------------------------------------------------
+   Helper Function for Week Numbers
+   --------------------------------------------------------------------- */
+function getWeekNumber(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+// FIXED: Enhanced check if all members are paid up
 function checkAllMembersPaidUp(equb) {
-  if (!equb || equb.members.length === 0) return false;
+  if (!equb || !equb.members || equb.members.length === 0) return false;
   
-  return equb.members.every(member => {
-    const missed = computeMemberMissedCycles(equb, member);
-    return missed === 0;
+  // For completed equbs, all members are considered paid up
+  if (equb.status === 'completed') return true;
+  
+  // For forming equbs, all members are considered "paid up" since no cycles have started
+  if (equb.status === 'forming') return true;
+  
+  // For active equbs, check if all members have no missed payments
+  if (equb.status === 'active') {
+    const allMembersPaid = equb.members.every(member => {
+      const missed = computeMemberMissedCycles(equb, member);
+      return missed === 0;
+    });
+    
+    return allMembersPaid;
+  }
+  
+  return false;
+}
+
+function updateRequiredAmount() {
+  const sel = el('contribution-member');
+  const memberId = sel?.value;
+  const equb = getCurrentEqub();
+  
+  if (!equb || !memberId) {
+    if (el('required-amount-display')) el('required-amount-display').style.display = 'none';
+    return;
+  }
+  
+  const member = equb.members.find(m => m.id === memberId);
+  const missed = computeMemberMissedCycles(equb, member);
+  const totalRequired = equb.contributionAmount + missed * equb.contributionAmount;
+  
+  if (el('required-amount')) el('required-amount').textContent = formatCurrency(totalRequired);
+  if (el('missed-count')) el('missed-count').textContent = missed;
+  if (el('required-amount-display')) el('required-amount-display').style.display = 'block';
+  
+  // Auto-fill amount field with required amount
+  if (el('contribute-amount')) {
+    el('contribute-amount').value = totalRequired.toFixed(2);
+    el('contribute-amount').placeholder = `Required: ${formatCurrency(totalRequired)} ETB`;
+  }
+}
+
+function contribute() {
+  const memberId = el('contribution-member')?.value;
+  const amount = parseFloat(el('contribute-amount')?.value);
+  const equb = getCurrentEqub();
+  
+  if (!equb || !memberId || isNaN(amount) || amount <= 0) {
+    return alert('Please select a member and enter a valid amount');
+  }
+  
+  const member = equb.members.find(m => m.id === memberId);
+  if (!member) return alert('Member not found');
+  
+  const missed = computeMemberMissedCycles(equb, member);
+  const required = equb.contributionAmount + missed * equb.contributionAmount;
+  
+  // Allow admin to accept any amount, but warn if less than required
+  if (amount < required) {
+    const confirmMsg = `You are paying ${formatCurrency(amount)} ETB, but ${member.name} owes ${formatCurrency(required)} ETB. Continue anyway?`;
+    if (!confirm(confirmMsg)) return;
+  }
+  
+  const today = toDateOnlyString(new Date());
+  
+  // Check if already paid today for daily equbs - ONLY IN CURRENT CYCLE
+  if (equb.frequency === 'daily') {
+    const payoutHistory = equb.payoutHistory || [];
+    const totalMembers = equb.targetMembers || 1;
+    const currentCycle = Math.floor(payoutHistory.length / totalMembers);
+    
+    // Get contributions for current cycle only
+    const currentCycleContributions = (equb.contributions || []).filter(c => {
+      if (c.cycleUsed !== undefined) {
+        return c.cycleUsed === currentCycle;
+      }
+      // For contributions without cycle tracking, only include if they are after the last payout
+      if (payoutHistory.length > 0) {
+        const lastPayoutDate = new Date(payoutHistory[payoutHistory.length - 1].date);
+        const contributionDate = new Date(c.date);
+        return contributionDate > lastPayoutDate;
+      }
+      // No payouts yet, include all contributions
+      return true;
+    });
+    
+    const alreadyPaid = currentCycleContributions.some(c => 
+      c.userId === memberId && toDateOnlyString(c.date) === today
+    );
+    
+    if (alreadyPaid) {
+      return alert(`${member.name} has already paid today in the current cycle`);
+    }
+  }
+
+  equb.contributions = equb.contributions || [];
+  
+  // Set cycle tracking for new contributions
+  const payoutHistory = equb.payoutHistory || [];
+  const totalMembers = equb.targetMembers || 1;
+  const currentCycle = Math.floor(payoutHistory.length / totalMembers);
+  
+  const newContribution = { 
+    amount, 
+    userId: memberId, 
+    date: new Date().toISOString(),
+    memberName: member.name,
+    cycleUsed: currentCycle // Track which cycle this contribution belongs to
+  };
+  
+  equb.contributions.push(newContribution);
+  
+  pushActivity(`${member.name} paid ${formatCurrency(amount)} ETB`, equb.id);
+
+  // Update progress based on ACTUAL total collected vs goal
+  updateEqubProgress(equb);
+  
+  saveState();
+  closeModal('contribute');
+  success(getText('paidSuccess'));
+  updateHome();
+  updateMembers();
+
+  // Celebrate goal completion only when ALL members have paid their required amounts
+  if (equb.progress >= 100 && !equb.celebrated) {
+    const allPaidUp = checkAllMembersPaidUp(equb);
+    if (allPaidUp) {
+      equb.celebrated = true;
+      launchConfetti();
+      success(getText('goalReached'));
+    }
+  }
+}
+
+// FIXED: Enhanced progress calculation for proper payout cycles
+function updateEqubProgress(equb) {
+  if (!equb) return;
+  
+  // FIXED: Calculate current cycle based on payout history
+  const payoutHistory = equb.payoutHistory || [];
+  const totalMembers = equb.targetMembers || 1;
+  const currentCycle = Math.floor(payoutHistory.length / totalMembers);
+  
+  // FIXED: Calculate total collected in CURRENT CYCLE only
+  let totalCollectedThisCycle = 0;
+  
+  // Only count contributions from the current cycle
+  const currentCycleContributions = (equb.contributions || []).filter(c => {
+    if (c.cycleUsed !== undefined) {
+      return c.cycleUsed === currentCycle;
+    }
+    // For contributions without cycle tracking, only include if they are after the last payout
+    if (payoutHistory.length > 0) {
+      const lastPayoutIndex = payoutHistory.length - 1;
+      const lastPayoutDate = new Date(payoutHistory[lastPayoutIndex].date);
+      const contributionDate = new Date(c.date);
+      return contributionDate > lastPayoutDate;
+    }
+    // No payouts yet, include all contributions
+    return true;
   });
+  
+  totalCollectedThisCycle = currentCycleContributions.reduce((sum, c) => sum + (c.amount || 0), 0);
+  
+  // FIXED: Progress is based on current cycle collections vs goal
+  equb.progress = equb.goalAmount ? Math.min(100, (totalCollectedThisCycle / equb.goalAmount) * 100) : 0;
+  
+  // FIXED: Status logic
+  if (equb.status === 'completed') {
+    // Once completed, stay completed
+    return;
+  }
+  
+  // Auto-activate equb if we reach target members AND have at least one payment
+  if (equb.status === 'forming' && 
+      equb.members.length >= equb.targetMembers && 
+      totalCollectedThisCycle > 0) {
+    equb.status = 'active';
+    pushActivity(`🎊 Equb "${equb.name}" is now active! All members joined and payments started.`, equb.id);
+  }
+  
+  // REMOVED: Auto-complete logic to allow multiple rounds/cycles
+  // const totalPayouts = payoutHistory.length;
+  // 
+  // // Complete equb after all members receive one payout each
+  // if (totalPayouts >= totalMembers && equb.status !== 'completed') {
+  //   equb.status = 'completed';
+  //   equb.progress = 100; // Show 100% when completed
+  //   pushActivity(`🏆 Equb "${equb.name}" completed! All members have received their payouts.`, equb.id);
+  // }
+  
+  // NEW: Auto-start new round after completing a full rotation (reset for next cycle)
+  const totalPayouts = payoutHistory.length;
+  if (totalPayouts > 0 && totalPayouts % totalMembers === 0 && equb.status === 'active') {
+    // Reset for new round: reshuffle payout order, reset current index, reset celebrated flag
+    equb.payoutOrder = shuffleArray(equb.members.map(m => ({ ...m })));
+    equb.currentPayoutIndex = 0;
+    equb.celebrated = false; // Allow celebration for new round
+    pushActivity(`🔄 New round started for "${equb.name}"! Payout order refreshed.`, equb.id);
+    success('New round started! Continue contributing.');
+  }
+}
+
+// FIXED: Enhanced check if all members are paid up
+function checkAllMembersPaidUp(equb) {
+  if (!equb || !equb.members || equb.members.length === 0) return false;
+  
+  // For completed equbs, all members are considered paid up
+  if (equb.status === 'completed') return true;
+  
+  // For forming equbs, all members are considered "paid up" since no cycles have started
+  if (equb.status === 'forming') return true;
+  
+  // For active equbs, check if all members have no missed payments
+  if (equb.status === 'active') {
+    const allMembersPaid = equb.members.every(member => {
+      const missed = computeMemberMissedCycles(equb, member);
+      return missed === 0;
+    });
+    
+    return allMembersPaid;
+  }
+  
+  return false;
+}
+
+function updateRequiredAmount() {
+  const sel = el('contribution-member');
+  const memberId = sel?.value;
+  const equb = getCurrentEqub();
+  
+  if (!equb || !memberId) {
+    if (el('required-amount-display')) el('required-amount-display').style.display = 'none';
+    return;
+  }
+  
+  const member = equb.members.find(m => m.id === memberId);
+  const missed = computeMemberMissedCycles(equb, member);
+  const totalRequired = equb.contributionAmount + missed * equb.contributionAmount;
+  
+  if (el('required-amount')) el('required-amount').textContent = formatCurrency(totalRequired);
+  if (el('missed-count')) el('missed-count').textContent = missed;
+  if (el('required-amount-display')) el('required-amount-display').style.display = 'block';
+  
+  // Auto-fill amount field with required amount
+  if (el('contribute-amount')) {
+    el('contribute-amount').value = totalRequired.toFixed(2);
+    el('contribute-amount').placeholder = `Required: ${formatCurrency(totalRequired)} ETB`;
+  }
+}
+
+function contribute() {
+  const memberId = el('contribution-member')?.value;
+  const amount = parseFloat(el('contribute-amount')?.value);
+  const equb = getCurrentEqub();
+  
+  if (!equb || !memberId || isNaN(amount) || amount <= 0) {
+    return alert('Please select a member and enter a valid amount');
+  }
+  
+  const member = equb.members.find(m => m.id === memberId);
+  if (!member) return alert('Member not found');
+  
+  const missed = computeMemberMissedCycles(equb, member);
+  const required = equb.contributionAmount + missed * equb.contributionAmount;
+  
+  // Allow admin to accept any amount, but warn if less than required
+  if (amount < required) {
+    const confirmMsg = `You are paying ${formatCurrency(amount)} ETB, but ${member.name} owes ${formatCurrency(required)} ETB. Continue anyway?`;
+    if (!confirm(confirmMsg)) return;
+  }
+  
+  const today = toDateOnlyString(new Date());
+  
+  // FIXED: Check if already paid today for daily equbs - ONLY IN CURRENT CYCLE
+  if (equb.frequency === 'daily') {
+    const payoutHistory = equb.payoutHistory || [];
+    const totalMembers = equb.targetMembers || 1;
+    const currentCycle = Math.floor(payoutHistory.length / totalMembers);
+    
+    // Get contributions for current cycle only
+    const currentCycleContributions = (equb.contributions || []).filter(c => {
+      if (c.cycleUsed !== undefined) {
+        return c.cycleUsed === currentCycle;
+      }
+      // For contributions without cycle tracking, only include if they are after the last payout
+      if (payoutHistory.length > 0) {
+        const lastPayoutDate = new Date(payoutHistory[payoutHistory.length - 1].date);
+        const contributionDate = new Date(c.date);
+        return contributionDate > lastPayoutDate;
+      }
+      // No payouts yet, include all contributions
+      return true;
+    });
+    
+    const alreadyPaid = currentCycleContributions.some(c => 
+      c.userId === memberId && toDateOnlyString(c.date) === today
+    );
+    
+    if (alreadyPaid) {
+      return alert(`${member.name} has already paid today in the current cycle`);
+    }
+  }
+
+  equb.contributions = equb.contributions || [];
+  
+  // FIXED: Set cycle tracking for new contributions
+  const payoutHistory = equb.payoutHistory || [];
+  const totalMembers = equb.targetMembers || 1;
+  const currentCycle = Math.floor(payoutHistory.length / totalMembers);
+  
+  const newContribution = { 
+    amount, 
+    userId: memberId, 
+    date: new Date().toISOString(),
+    memberName: member.name,
+    cycleUsed: currentCycle // Track which cycle this contribution belongs to
+  };
+  
+  equb.contributions.push(newContribution);
+  
+  pushActivity(`${member.name} paid ${formatCurrency(amount)} ETB`, equb.id);
+
+  // Update progress based on ACTUAL total collected vs goal
+  updateEqubProgress(equb);
+  
+  saveState();
+  closeModal('contribute');
+  success(getText('paidSuccess'));
+  updateHome();
+  updateMembers();
+
+  // Celebrate goal completion only when ALL members have paid their required amounts
+  if (equb.progress >= 100 && !equb.celebrated) {
+    const allPaidUp = checkAllMembersPaidUp(equb);
+    if (allPaidUp) {
+      equb.celebrated = true;
+      launchConfetti();
+      success(getText('goalReached'));
+    }
+  }
+}
+// FIXED: Enhanced progress calculation for proper payout cycles
+function updateEqubProgress(equb) {
+  if (!equb) return;
+  
+  // FIXED: Calculate current cycle based on payout history
+  const payoutHistory = equb.payoutHistory || [];
+  const totalMembers = equb.targetMembers || 1;
+  const currentCycle = Math.floor(payoutHistory.length / totalMembers);
+  
+  // FIXED: Calculate total collected in CURRENT CYCLE only
+  let totalCollectedThisCycle = 0;
+  
+  // Only count contributions from the current cycle
+  const currentCycleContributions = (equb.contributions || []).filter(c => {
+    if (c.cycleUsed !== undefined) {
+      return c.cycleUsed === currentCycle;
+    }
+    // For contributions without cycle tracking, only include if they are after the last payout
+    if (payoutHistory.length > 0) {
+      const lastPayoutIndex = payoutHistory.length - 1;
+      const lastPayoutDate = new Date(payoutHistory[lastPayoutIndex].date);
+      const contributionDate = new Date(c.date);
+      return contributionDate > lastPayoutDate;
+    }
+    // No payouts yet, include all contributions
+    return true;
+  });
+  
+  totalCollectedThisCycle = currentCycleContributions.reduce((sum, c) => sum + (c.amount || 0), 0);
+  
+  // FIXED: Progress is based on current cycle collections vs goal
+  equb.progress = equb.goalAmount ? Math.min(100, (totalCollectedThisCycle / equb.goalAmount) * 100) : 0;
+  
+  // FIXED: Status logic
+  if (equb.status === 'completed') {
+    // Once completed, stay completed
+    return;
+  }
+  
+  // Auto-activate equb if we reach target members AND have at least one payment
+  if (equb.status === 'forming' && 
+      equb.members.length >= equb.targetMembers && 
+      totalCollectedThisCycle > 0) {
+    equb.status = 'active';
+    pushActivity(`🎊 Equb "${equb.name}" is now active! All members joined and payments started.`, equb.id);
+  }
+  
+  // FIXED: Auto-complete logic - complete after each member gets one full payout
+  const totalPayouts = payoutHistory.length;
+  
+  // Complete equb after all members receive one payout each
+  if (totalPayouts >= totalMembers && equb.status !== 'completed') {
+    equb.status = 'completed';
+    equb.progress = 100; // Show 100% when completed
+    pushActivity(`🏆 Equb "${equb.name}" completed! All members have received their payouts.`, equb.id);
+  }
+}
+
+// FIXED: Enhanced check if all members are paid up
+function checkAllMembersPaidUp(equb) {
+  if (!equb || !equb.members || equb.members.length === 0) return false;
+  
+  // For completed equbs, all members are considered paid up
+  if (equb.status === 'completed') return true;
+  
+  // For forming equbs, all members are considered "paid up" since no cycles have started
+  if (equb.status === 'forming') return true;
+  
+  // For active equbs, check if all members have no missed payments
+  if (equb.status === 'active') {
+    const allMembersPaid = equb.members.every(member => {
+      const missed = computeMemberMissedCycles(equb, member);
+      return missed === 0;
+    });
+    
+    return allMembersPaid;
+  }
+  
+  return false;
 }
 
 /* ---------------------------------------------------------------------
-   Payment Cycle Calculations - IMPROVED
+   Payment Cycle Calculations - IMPROVED WITH ROUND RESET SUPPORT
    --------------------------------------------------------------------- */
 function computeMemberMissedCycles(equb, member) {
   if (!equb || !member || equb.status !== 'active') return 0;
@@ -1117,58 +1676,129 @@ function computeMemberMissedCycles(equb, member) {
   const today = new Date(); 
   today.setHours(0, 0, 0, 0);
   
-  // Determine cycle interval based on frequency
-  let cycleMs;
-  switch (equb.frequency) {
-    case 'daily': cycleMs = 24 * 60 * 60 * 1000; break;
-    case 'weekly': cycleMs = 7 * 24 * 60 * 60 * 1000; break;
-    case 'monthly': cycleMs = 30 * 24 * 60 * 60 * 1000; break;
-    case 'yearly': cycleMs = 365 * 24 * 60 * 60 * 1000; break;
-    default: return 0;
+  // FIXED: Get current cycle based on payout history
+  const payoutHistory = equb.payoutHistory || [];
+  const totalMembers = equb.targetMembers || 1;
+  const currentCycle = Math.floor(payoutHistory.length / totalMembers);
+  
+  // Find the start date for current cycle
+  let cycleStartDate;
+  if (payoutHistory.length > 0) {
+    const cycleStartIndex = currentCycle * totalMembers;
+    if (cycleStartIndex < payoutHistory.length) {
+      cycleStartDate = new Date(payoutHistory[cycleStartIndex].date);
+    } else {
+      // Current cycle hasn't started yet, use the date after last payout
+      const lastPayoutIndex = payoutHistory.length - 1;
+      cycleStartDate = new Date(payoutHistory[lastPayoutIndex].date);
+      cycleStartDate.setDate(cycleStartDate.getDate() + 1);
+    }
+  } else {
+    // No payouts yet, use equb start date
+    cycleStartDate = new Date(equb.startDate);
   }
   
-  // Get member's contributions sorted by date (newest first)
-  const memberContributions = (equb.contributions || [])
-    .filter(c => c.userId === member.id)
-    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  cycleStartDate.setHours(0, 0, 0, 0);
   
-  // Find the start date for this member (when they joined or equb started, whichever is later)
-  const memberStartDate = new Date(Math.max(
-    new Date(member.joinedAt).getTime(),
-    new Date(equb.startDate).getTime()
-  ));
-  memberStartDate.setHours(0, 0, 0, 0);
-  
-  // FIX: Don't count today as a cycle if the equb just started
-  const comparisonDate = new Date(today);
-  
-  // If the start date is today, no cycles have been missed yet
-  if (memberStartDate.getTime() === today.getTime()) {
+  // If cycle start date is in the future, no cycles missed
+  if (cycleStartDate > today) {
     return 0;
   }
   
-  let lastPayment = memberStartDate;
+  // Get member's contributions for current cycle only
+  const currentCycleContributions = (equb.contributions || []).filter(c => {
+    if (c.cycleUsed !== undefined) {
+      return c.cycleUsed === currentCycle;
+    }
+    // Fallback: contributions after cycle start date
+    const contributionDate = new Date(c.date);
+    return contributionDate >= cycleStartDate && c.userId === member.id;
+  });
   
-  // If member has payments, use the most recent one
-  if (memberContributions.length > 0) {
-    lastPayment = new Date(memberContributions[0].date);
-    lastPayment.setHours(0, 0, 0, 0);
-  }
-  
-  // FIX: Calculate cycles from start to yesterday (not including today)
+  // Calculate cycles from cycle start to yesterday (not including today)
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
   
-  // Calculate total expected cycles from start date to yesterday
-  const totalExpectedCycles = Math.max(0, Math.floor((yesterday - memberStartDate) / cycleMs) + 1);
+  // Calculate total expected cycles based on frequency
+  let totalExpectedCycles = 0;
   
-  // Calculate paid cycles
-  const paidCycles = memberContributions.length;
+  switch (equb.frequency) {
+    case 'daily':
+      totalExpectedCycles = Math.max(0, Math.floor((yesterday - cycleStartDate) / (24 * 60 * 60 * 1000)) + 1);
+      break;
+      
+    case 'weekly':
+      // Count weeks from cycle start to yesterday
+      const weeksDiff = Math.floor((yesterday - cycleStartDate) / (7 * 24 * 60 * 60 * 1000));
+      totalExpectedCycles = Math.max(0, weeksDiff + 1);
+      break;
+      
+    case 'monthly':
+      // Count months from cycle start to yesterday
+      const startYear = cycleStartDate.getFullYear();
+      const startMonth = cycleStartDate.getMonth();
+      const endYear = yesterday.getFullYear();
+      const endMonth = yesterday.getMonth();
+      
+      totalExpectedCycles = Math.max(0, (endYear - startYear) * 12 + (endMonth - startMonth) + 1);
+      break;
+      
+    case 'yearly':
+      // Count years from cycle start to yesterday
+      totalExpectedCycles = Math.max(0, yesterday.getFullYear() - cycleStartDate.getFullYear() + 1);
+      break;
+      
+    default:
+      return 0;
+  }
+  
+  // Calculate paid cycles in current cycle
+  const paidCycles = currentCycleContributions.length;
   
   // Missed cycles = total expected cycles - paid cycles
   const missedCycles = Math.max(0, totalExpectedCycles - paidCycles);
   
   return missedCycles;
+}
+
+
+
+// HELPER: Shuffle array for random payout order
+function shuffleArray(array) {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+// MANUAL RESET: Function to manually reset payments for new cycle (admin use)
+function resetPaymentsForNewCycle() {
+  const equb = getCurrentEqub();
+  if (!equb || equb.creatorId !== state.user?.id) return;
+  
+  if (confirm('Reset all payments for new cycle? This will start fresh collection.')) {
+    // Mark all contributions as from previous cycles
+    const payoutHistory = equb.payoutHistory || [];
+    const totalMembers = equb.targetMembers || 1;
+    const currentCycle = Math.floor(payoutHistory.length / totalMembers);
+    
+    equb.contributions.forEach(contribution => {
+      if (contribution.cycleUsed === undefined) {
+        contribution.cycleUsed = currentCycle - 1; // Mark as previous cycle
+      }
+    });
+    
+    equb.progress = 0;
+    equb.celebrated = false;
+    
+    pushActivity('Payments reset for new cycle', equb.id);
+    saveState();
+    updateHome();
+    updateMembers();
+    
+    success('Payments reset! Ready for new cycle collections.');
+  }
 }
 /* ---------------------------------------------------------------------
    Payout Management - UPDATED
@@ -1185,26 +1815,46 @@ function populatePayoutRecipients() {
   // FIXED: PAYOUT ORDER LOOPING LOGIC
   const allMembers = equb.members || [];
   const payoutHistory = equb.payoutHistory || [];
+  const totalMembers = equb.targetMembers || 1;
   
-  let eligibleMembers = [];
+  // Find members who haven't received payout in current cycle
+  const currentCycleStart = payoutHistory.length - (payoutHistory.length % totalMembers);
+  const currentCyclePayouts = payoutHistory.slice(currentCycleStart);
+  const paidMemberIds = currentCyclePayouts.map(p => p.recipientId);
   
-  if (payoutHistory.length >= allMembers.length) {
-    // All members have been paid - restart cycle
-    eligibleMembers = allMembers;
+  const eligibleMembers = allMembers.filter(m => !paidMemberIds.includes(m.id));
+  
+  if (eligibleMembers.length === 0) {
+    // All members have been paid in current cycle
+    select.innerHTML += '<option value="">All members paid in current cycle</option>';
+    
+    // FIXED: Auto-reset for next cycle if all members paid
+    if (payoutHistory.length > 0 && payoutHistory.length % totalMembers === 0) {
+      // This should trigger automatically when the last payout is processed
+      console.log('All members paid in cycle - ready for next cycle');
+    }
   } else {
-    // Find members who haven't received payout yet
-    const paidMemberIds = payoutHistory.map(p => p.recipientId);
-    eligibleMembers = allMembers.filter(m => !paidMemberIds.includes(m.id));
+    eligibleMembers.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = escapeHtml(m.name);
+      
+      // Show if this member is next in payout order
+      const payoutOrder = equb.payoutOrder || [];
+      const orderIndex = payoutOrder.findIndex(p => p.id === m.id);
+      if (orderIndex >= 0) {
+        opt.textContent += ` (#${orderIndex + 1} in order)`;
+      }
+      
+      select.appendChild(opt);
+    });
   }
-  
-  eligibleMembers.forEach(m => {
-    const opt = document.createElement('option');
-    opt.value = m.id;
-    opt.textContent = escapeHtml(m.name);
-    select.appendChild(opt);
-  });
 }
 
+
+/* ---------------------------------------------------------------------
+   Payout Management - FIXED PAYMENT RESET
+   --------------------------------------------------------------------- */
 function performPayout() {
   const recipientId = el('payout-recipient')?.value;
   const equb = getCurrentEqub();
@@ -1212,48 +1862,97 @@ function performPayout() {
   if (!equb || equb.creatorId !== state.user?.id || !recipientId) {
     return alert('Invalid payout request');
   }
-  
+
   const recipient = equb.members.find(m => m.id === recipientId);
   if (!recipient) return alert('Member not found');
-  
-  // FIXED: Check if all members are paid up before allowing payout
-  const allPaidUp = checkAllMembersPaidUp(equb);
-  if (!allPaidUp) {
-    const unpaidCount = equb.members.filter(m => computeMemberMissedCycles(equb, m) > 0).length;
-    return alert(`Cannot process payout. ${unpaidCount} members still have unpaid contributions.`);
+
+  // Validation - must be at 100% progress
+  if (equb.progress < 100) {
+    return alert(`Progress must be 100% to process payout. Current progress: ${equb.progress.toFixed(1)}%`);
   }
+
+  if (!checkAllMembersPaidUp(equb)) {
+    const unpaidCount = equb.members.filter(m => computeMemberMissedCycles(equb, m) > 0).length;
+    return alert(`${unpaidCount} members have unpaid contributions`);
+  }
+
+  if (equb.status !== 'active') {
+    return alert('Equb must be active');
+  }
+
+  // Check if recipient already received payout in current cycle
+  const payoutHistory = equb.payoutHistory || [];
+  const totalMembers = equb.targetMembers || 1;
+  const currentCycleStart = payoutHistory.length - (payoutHistory.length % totalMembers);
+  const currentCyclePayouts = payoutHistory.slice(currentCycleStart);
+  const alreadyPaid = currentCyclePayouts.some(p => p.recipientId === recipientId);
   
+  if (alreadyPaid) {
+    return alert(`${recipient.name} has already received a payout in this cycle`);
+  }
+
+  // Payout the FULL goal amount to one member
+  const payoutAmount = equb.goalAmount;
+
   equb.payoutHistory = equb.payoutHistory || [];
   const round = equb.payoutHistory.length + 1;
-  
+
   equb.payoutHistory.push({ 
     round, 
     recipientId, 
     recipientName: recipient.name,
     date: new Date().toISOString(),
-    amount: equb.goalAmount / equb.targetMembers
+    amount: payoutAmount
   });
-  
+
   pushActivity(
-    `${recipient.name} received payout for round ${round} (${formatCurrency(equb.goalAmount / equb.targetMembers)} ETB)`, 
+    `${recipient.name} received FULL payout of ${formatCurrency(payoutAmount)} ETB for round ${round}`, 
     equb.id
   );
-  
-  // Reset for next cycle
-  equb.progress = 0;
-  equb.contributions = [];
-  equb.celebrated = false;
-  
-  // Complete equb if all members received payout and we've completed full cycles
+
+  // CRITICAL: Calculate current cycle and reset for next round
   const totalPayouts = equb.payoutHistory.length;
-  const totalMembers = equb.targetMembers;
+  const completedCycle = Math.floor((totalPayouts - 1) / totalMembers);
   
-  if (totalPayouts >= totalMembers && totalPayouts % totalMembers === 0) {
+  console.log(`Payout #${totalPayouts}, Completed Cycle: ${completedCycle}`);
+
+  // MARK 1: Reset progress to 0% for the NEXT cycle
+  equb.progress = 0;
+  equb.celebrated = false;
+
+  // MARK 2: Clear contributions that were used in the completed cycle
+  const contributionsToKeep = equb.contributions.filter(c => 
+    c.cycleUsed === undefined || c.cycleUsed < completedCycle
+  );
+  
+  console.log(`Clearing contributions for new cycle. Before: ${equb.contributions.length}, After: ${contributionsToKeep.length}`);
+  
+  equb.contributions = contributionsToKeep;
+
+  // MARK 3: Auto-complete logic after all members receive one payout
+  if (totalPayouts >= totalMembers && equb.status !== 'completed') {
     equb.status = 'completed';
-    pushActivity(`Equb "${equb.name}" completed! All members have received their payouts.`, equb.id);
-    success('Equb completed! All payouts distributed.');
+    equb.progress = 100;
+    success(`🎉 ${recipient.name} received ${formatCurrency(payoutAmount)} ETB! Equb completed - all ${totalMembers} members have received payouts.`);
+    pushActivity(`🏆 Equb "${equb.name}" completed! All members have received their full payouts.`, equb.id);
+  } else if (totalPayouts % totalMembers === 0) {
+    // MARK 4: Completed a full cycle (all members paid once) - RESET FOR NEW CYCLE
+    const cycleNumber = Math.floor(totalPayouts / totalMembers);
+    
+    success(`🎉 ${recipient.name} received ${formatCurrency(payoutAmount)} ETB! Cycle ${cycleNumber} completed. Starting fresh cycle ${cycleNumber + 1}.`);
+    pushActivity(`✅ Completed full payout cycle ${cycleNumber}! All ${totalMembers} members have received payouts. Starting fresh cycle ${cycleNumber + 1}.`, equb.id);
+    
+    // MARK 5: Reset payout order for new cycle
+    equb.payoutOrder = shuffleArray(equb.members.map(m => ({ ...m })));
+    equb.currentPayoutIndex = 0;
+    
+    // Reset any member tracking for new cycle
+    equb.members.forEach(member => {
+      member._lastPaymentCycle = cycleNumber;
+    });
   } else {
-    success(getText('payoutSuccess'));
+    const currentPayoutNumber = (totalPayouts % totalMembers);
+    success(`💰 ${recipient.name} received ${formatCurrency(payoutAmount)} ETB! Progress reset to 0% for payout ${currentPayoutNumber + 1}/${totalMembers}.`);
   }
   
   saveState();
@@ -1382,6 +2081,9 @@ function savePayoutOrder() {
 /* ---------------------------------------------------------------------
    Enhanced Home Page Display - FIXED
    --------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------
+   Enhanced Home Page Display - FIXED
+   --------------------------------------------------------------------- */
 function updateHome() {
   const equb = getCurrentEqub();
   if (!equb) {
@@ -1412,29 +2114,68 @@ function updateHome() {
   const remaining = Math.max(0, (equb.goalAmount || 0) - collected);
   setText('progress-remaining', `${formatCurrency(remaining)} ${getText('ETB')} left`);
 
-  // FIXED: Show actual payment status
-  const allPaidUp = checkAllMembersPaidUp(equb);
-  const statusText = allPaidUp ? 'Ready for Payout' : getText(equb.status);
+  // Enhanced status determination with round tracking
+  let statusText;
+  const totalPayouts = equb.payoutHistory?.length || 0;
+  const totalMembers = equb.targetMembers || 1;
+  const currentCycle = Math.floor(totalPayouts / totalMembers);
+  const currentPayoutInCycle = totalPayouts % totalMembers;
+  
+  if (equb.status === 'completed') {
+    statusText = getText('completed');
+  } else if (equb.status === 'active') {
+    const allPaidUp = checkAllMembersPaidUp(equb);
+    
+    // Check if we're between cycles (just completed a payout cycle)
+    const isBetweenCycles = totalPayouts > 0 && totalPayouts % totalMembers === 0;
+    
+    if (percent >= 100 && allPaidUp) {
+      statusText = 'Ready for Payout';
+    } else if (isBetweenCycles) {
+      statusText = `Active - Cycle ${currentCycle + 1} Ready`;
+    } else {
+      statusText = `Active - Cycle ${currentCycle + 1}`;
+    }
+  } else {
+    // Forming status - not enough members or no payments yet
+    statusText = getText('forming');
+  }
+
   setText('status', getText('status', statusText));
 
-  setText('current-round', String((equb.payoutHistory || []).length + 1));
-  setText('total-rounds', String(equb.targetMembers || 0));
+  // Enhanced Round calculation - show current cycle and payout number
+  const currentPayoutNumber = currentPayoutInCycle + 1;
+  const totalRoundsInCycle = totalMembers;
 
-  // FIXED: Payment gating logic
+  setText('current-round', `${currentPayoutNumber}`);
+  setText('total-rounds', String(totalRoundsInCycle));
+  setText('current-cycle', `Cycle ${currentCycle + 1}`);
+
+  // Payment gating logic
   const paymentNotice = el('payment-notice');
   const contributeBtn = el('contribute-button');
   const payoutBtn = el('payout-button');
   
-  // Enable contribute button always
+  // Always enable contribute button if equb is active or forming
   if (contributeBtn) {
-    contributeBtn.disabled = false;
-    contributeBtn.style.pointerEvents = 'auto';
-    contributeBtn.style.opacity = '1';
+    const canContribute = equb.status === 'active' || equb.status === 'forming';
+    contributeBtn.disabled = !canContribute;
+    contributeBtn.style.pointerEvents = canContribute ? 'auto' : 'none';
+    contributeBtn.style.opacity = canContribute ? '1' : '0.5';
   }
   
-  // Payout button only for creator when ALL members are paid up AND progress is 100%
+  // Enhanced Payout button logic
   if (payoutBtn) {
-    if (percent >= 100 && allPaidUp && equb.creatorId === state.user?.id) {
+    const allPaidUp = checkAllMembersPaidUp(equb);
+    const canPayout = (
+      equb.creatorId === state.user?.id &&      // Only creator can payout
+      percent >= 100 &&                         // 100% progress reached
+      allPaidUp &&                             // All members paid up
+      equb.status === 'active' &&              // Equb is active
+      equb.members.length >= equb.targetMembers // All member slots filled
+    );
+    
+    if (canPayout) {
       payoutBtn.disabled = false;
       payoutBtn.style.pointerEvents = 'auto';
       payoutBtn.style.opacity = '1';
@@ -1446,11 +2187,16 @@ function updateHome() {
       
       // Show appropriate notice
       if (paymentNotice) {
-        if (percent < 100) {
-          paymentNotice.innerHTML = `<span data-key="completeProgress">Complete 100% progress to enable payouts</span>`;
+        paymentNotice.style.display = 'block';
+        if (equb.status !== 'active') {
+          paymentNotice.textContent = 'Equb must be active to process payouts';
+        } else if (percent < 100) {
+          paymentNotice.textContent = getText('completeProgress');
         } else if (!allPaidUp) {
           const unpaidCount = equb.members.filter(m => computeMemberMissedCycles(equb, m) > 0).length;
-          paymentNotice.innerHTML = `<span>${unpaidCount} members still have unpaid contributions</span>`;
+          paymentNotice.textContent = `${unpaidCount} members have unpaid contributions`;
+        } else if (equb.creatorId !== state.user?.id) {
+          paymentNotice.textContent = 'Only the equb creator can process payouts';
         } else {
           paymentNotice.style.display = 'none';
         }
@@ -1458,10 +2204,214 @@ function updateHome() {
     }
   }
   
-  // Update daily payments section
-  updateDailyPayments(equb);
+  // CRITICAL FIX: Update payment status section for ALL frequencies
+  updatePaymentStatus(equb);
 }
 
+
+/* ---------------------------------------------------------------------
+   Enhanced Payment Status Display for All Frequencies
+   --------------------------------------------------------------------- */
+function updatePaymentStatus(equb) {
+  const paymentDiv = el('payment-status-section');
+  if (!paymentDiv) return;
+  
+  // Show payment status for ALL frequencies
+  paymentDiv.style.display = 'block';
+  
+  let periodText = '';
+  switch (equb.frequency) {
+    case 'daily': 
+      periodText = getText('today'); 
+      break;
+    case 'weekly': 
+      periodText = getText('thisWeek'); 
+      break;
+    case 'monthly': 
+      periodText = 'this month'; 
+      break;
+    case 'yearly': 
+      periodText = 'this year'; 
+      break;
+  }
+  
+  setText('current-period', `${periodText.charAt(0).toUpperCase() + periodText.slice(1)}`);
+  
+  const list = el('payments-list');
+  if (list) {
+    list.innerHTML = '';
+    const today = new Date();
+    
+    // FIXED: Get current cycle based on payout history
+    const payoutHistory = equb.payoutHistory || [];
+    const totalMembers = equb.targetMembers || 1;
+    const currentCycle = Math.floor(payoutHistory.length / totalMembers);
+    
+    // FIXED: Get contributions for CURRENT cycle only
+    const currentCycleContributions = (equb.contributions || []).filter(c => {
+      if (c.cycleUsed !== undefined) {
+        return c.cycleUsed === currentCycle;
+      }
+      // For contributions without cycle tracking, only include if they are after the last payout
+      if (payoutHistory.length > 0) {
+        const lastPayoutDate = new Date(payoutHistory[payoutHistory.length - 1].date);
+        const contributionDate = new Date(c.date);
+        return contributionDate > lastPayoutDate;
+      }
+      // No payouts yet, include all contributions
+      return true;
+    });
+
+    (equb.members || []).forEach(m => {
+      // Check if member has paid in current period based on frequency
+      let paidThisPeriod = false;
+      
+      switch (equb.frequency) {
+        case 'daily':
+          paidThisPeriod = currentCycleContributions.some(c => 
+            c.userId === m.id && toDateOnlyString(c.date) === toDateOnlyString(today)
+          );
+          break;
+          
+        case 'weekly':
+          const thisWeek = getWeekNumber(today);
+          paidThisPeriod = currentCycleContributions.some(c => {
+            if (c.userId !== m.id) return false;
+            const contributionDate = new Date(c.date);
+            const contributionWeek = getWeekNumber(contributionDate);
+            return contributionWeek === thisWeek;
+          });
+          break;
+          
+        case 'monthly':
+          const thisMonth = today.getMonth();
+          const thisYear = today.getFullYear();
+          paidThisPeriod = currentCycleContributions.some(c => {
+            if (c.userId !== m.id) return false;
+            const contributionDate = new Date(c.date);
+            return contributionDate.getMonth() === thisMonth && 
+                   contributionDate.getFullYear() === thisYear;
+          });
+          break;
+          
+        case 'yearly':
+          const thisYearOnly = today.getFullYear();
+          paidThisPeriod = currentCycleContributions.some(c => {
+            if (c.userId !== m.id) return false;
+            const contributionDate = new Date(c.date);
+            return contributionDate.getFullYear() === thisYearOnly;
+          });
+          break;
+      }
+      
+      // Calculate missed cycles only for current cycle
+      const missed = computeMemberMissedCyclesCurrentCycle(equb, m, currentCycle);
+      const totalOwed = missed * equb.contributionAmount;
+      
+      const div = document.createElement('div');
+      div.className = `payment-status ${paidThisPeriod ? 'paid' : 'not-paid'}`;
+      
+      let statusText = paidThisPeriod ? getText('paid') : getText('notPaid');
+      if (missed > 0 && !paidThisPeriod) {
+        statusText += ` (${getText('missedDaysCount', missed, formatCurrency(totalOwed))})`;
+      }
+      
+      div.innerHTML = `
+        <span class="member-name">${escapeHtml(m.name)}</span>
+        <span class="status">${statusText}</span>
+      `;
+      list.appendChild(div);
+    });
+  }
+}
+
+
+// Calculate missed cycles only for the current payout cycle
+function computeMemberMissedCyclesCurrentCycle(equb, member, currentCycle) {
+  if (!equb || !member || equb.status !== 'active') return 0;
+  
+  const today = new Date(); 
+  today.setHours(0, 0, 0, 0);
+  
+  // Find the start date for current cycle
+  const payoutHistory = equb.payoutHistory || [];
+  let cycleStartDate;
+  
+  if (payoutHistory.length > 0) {
+    // Start from the beginning of current cycle
+    const cycleStartIndex = currentCycle * (equb.targetMembers || 1);
+    if (cycleStartIndex < payoutHistory.length) {
+      cycleStartDate = new Date(payoutHistory[cycleStartIndex].date);
+    } else {
+      // Current cycle hasn't started yet, use today
+      cycleStartDate = new Date();
+    }
+  } else {
+    // No payouts yet, use equb start date
+    cycleStartDate = new Date(equb.startDate);
+  }
+  
+  cycleStartDate.setHours(0, 0, 0, 0);
+  
+  // If the cycle start date is in the future, no cycles missed
+  if (cycleStartDate > today) {
+    return 0;
+  }
+  
+  // Get member's contributions for current cycle only
+  const currentCycleContributions = (equb.contributions || []).filter(c => {
+    if (c.cycleUsed !== undefined) {
+      return c.cycleUsed === currentCycle;
+    }
+    // Fallback: contributions after cycle start date
+    const contributionDate = new Date(c.date);
+    return contributionDate >= cycleStartDate && c.userId === member.id;
+  });
+  
+  // Calculate cycles from cycle start to yesterday (not including today)
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  
+  // Calculate total expected cycles based on frequency
+  let totalExpectedCycles = 0;
+  
+  switch (equb.frequency) {
+    case 'daily':
+      totalExpectedCycles = Math.max(0, Math.floor((yesterday - cycleStartDate) / (24 * 60 * 60 * 1000)) + 1);
+      break;
+      
+    case 'weekly':
+      const weeksDiff = Math.floor((yesterday - cycleStartDate) / (7 * 24 * 60 * 60 * 1000));
+      totalExpectedCycles = Math.max(0, weeksDiff + 1);
+      break;
+      
+    case 'monthly':
+      const startYear = cycleStartDate.getFullYear();
+      const startMonth = cycleStartDate.getMonth();
+      const endYear = yesterday.getFullYear();
+      const endMonth = yesterday.getMonth();
+      
+      totalExpectedCycles = Math.max(0, (endYear - startYear) * 12 + (endMonth - startMonth) + 1);
+      break;
+      
+    case 'yearly':
+      totalExpectedCycles = Math.max(0, yesterday.getFullYear() - cycleStartDate.getFullYear() + 1);
+      break;
+      
+    default:
+      return 0;
+  }
+  
+  // Calculate paid cycles in current cycle
+  const paidCycles = currentCycleContributions.length;
+  
+  // Missed cycles = total expected cycles - paid cycles
+  const missedCycles = Math.max(0, totalExpectedCycles - paidCycles);
+  
+  return missedCycles;
+}
+
+// Update daily payments display - FIXED
 function updateDailyPayments(equb) {
   const dailyDiv = el('daily-payments');
   if (!dailyDiv) return;
@@ -1475,12 +2425,40 @@ function updateDailyPayments(equb) {
       list.innerHTML = '';
       const today = toDateOnlyString(new Date());
       
+      // FIXED: Get current cycle based on payout history
+      const payoutHistory = equb.payoutHistory || [];
+      const totalMembers = equb.targetMembers || 1;
+      const currentCycle = Math.floor(payoutHistory.length / totalMembers);
+      
+      console.log('Current Cycle:', currentCycle, 'Total Payouts:', payoutHistory.length);
+      
+      // FIXED: Get contributions for CURRENT cycle only
+      const currentCycleContributions = (equb.contributions || []).filter(c => {
+        // Only include contributions that are marked for current cycle
+        // OR contributions without cycle marking (for backward compatibility)
+        if (c.cycleUsed !== undefined) {
+          return c.cycleUsed === currentCycle;
+        }
+        // For contributions without cycle tracking, only include if they are after the last payout
+        if (payoutHistory.length > 0) {
+          const lastPayoutDate = new Date(payoutHistory[payoutHistory.length - 1].date);
+          const contributionDate = new Date(c.date);
+          return contributionDate > lastPayoutDate;
+        }
+        // No payouts yet, include all contributions
+        return true;
+      });
+
+      console.log('Total Contributions:', equb.contributions.length, 'Current Cycle Contributions:', currentCycleContributions.length);
+
       (equb.members || []).forEach(m => {
-        const paidToday = (equb.contributions || []).some(c => 
+        // FIXED: Check if member has paid TODAY in the CURRENT CYCLE only
+        const paidToday = currentCycleContributions.some(c => 
           c.userId === m.id && toDateOnlyString(c.date) === today
         );
         
-        const missed = computeMemberMissedCycles(equb, m);
+        // Calculate missed days only for current cycle
+        const missed = computeMemberMissedCyclesCurrentCycle(equb, m, currentCycle);
         const totalOwed = missed * equb.contributionAmount;
         
         const div = document.createElement('div');
@@ -1501,6 +2479,73 @@ function updateDailyPayments(equb) {
   } else {
     dailyDiv.style.display = 'none';
   }
+}
+// Calculate missed cycles only for the current payout cycle
+function computeMemberMissedCyclesCurrentCycle(equb, member, currentCycle) {
+  if (!equb || !member || equb.status !== 'active') return 0;
+  
+  const today = new Date(); 
+  today.setHours(0, 0, 0, 0);
+  
+  // Determine cycle interval based on frequency
+  let cycleMs;
+  switch (equb.frequency) {
+    case 'daily': cycleMs = 24 * 60 * 60 * 1000; break;
+    case 'weekly': cycleMs = 7 * 24 * 60 * 60 * 1000; break;
+    case 'monthly': cycleMs = 30 * 24 * 60 * 60 * 1000; break;
+    case 'yearly': cycleMs = 365 * 24 * 60 * 60 * 1000; break;
+    default: return 0;
+  }
+  
+  // Find the start date for current cycle
+  const payoutHistory = equb.payoutHistory || [];
+  let cycleStartDate;
+  
+  if (payoutHistory.length > 0) {
+    // Start from the beginning of current cycle
+    const cycleStartIndex = currentCycle * (equb.targetMembers || 1);
+    if (cycleStartIndex < payoutHistory.length) {
+      cycleStartDate = new Date(payoutHistory[cycleStartIndex].date);
+    } else {
+      // Current cycle hasn't started yet, use today
+      cycleStartDate = new Date();
+    }
+  } else {
+    // No payouts yet, use equb start date
+    cycleStartDate = new Date(equb.startDate);
+  }
+  
+  cycleStartDate.setHours(0, 0, 0, 0);
+  
+  // If the cycle start date is in the future, no cycles missed
+  if (cycleStartDate > today) {
+    return 0;
+  }
+  
+  // Get member's contributions for current cycle only
+  const currentCycleContributions = (equb.contributions || []).filter(c => {
+    if (c.cycleUsed !== undefined) {
+      return c.cycleUsed === currentCycle;
+    }
+    // Fallback: contributions after cycle start date
+    const contributionDate = new Date(c.date);
+    return contributionDate >= cycleStartDate && c.userId === member.id;
+  });
+  
+  // Calculate cycles from cycle start to yesterday (not including today)
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  
+  // Calculate total expected cycles from cycle start date to yesterday
+  const totalExpectedCycles = Math.max(0, Math.floor((yesterday - cycleStartDate) / cycleMs) + 1);
+  
+  // Calculate paid cycles in current cycle
+  const paidCycles = currentCycleContributions.length;
+  
+  // Missed cycles = total expected cycles - paid cycles
+  const missedCycles = Math.max(0, totalExpectedCycles - paidCycles);
+  
+  return missedCycles;
 }
 
 /* ---------------------------------------------------------------------
@@ -1530,6 +2575,34 @@ function updateMembers() {
     const payoutOrderIndex = equb.payoutOrder?.findIndex(m => m.id === member.id) ?? index;
     const missed = computeMemberMissedCycles(equb, member);
     const totalOwed = missed * equb.contributionAmount;
+    const isFullyPaid = missed === 0;
+    
+    // Enhanced status display
+    let paymentStatus = '';
+    if (equb.frequency === 'daily') {
+      const today = toDateOnlyString(new Date());
+      const paidToday = (equb.contributions || []).some(c => 
+        c.userId === member.id && toDateOnlyString(c.date) === today
+      );
+      
+      if (paidToday) {
+        paymentStatus = `<div class="payment-status paid">${getText('paid')} today</div>`;
+      } else if (missed > 0) {
+        paymentStatus = `<div class="payment-status not-paid">${getText('missedDaysCount', missed, formatCurrency(totalOwed))}</div>`;
+      } else {
+        paymentStatus = `<div class="payment-status not-paid">${getText('notPaid')} today</div>`;
+      }
+    } else {
+      // For non-daily equbs, show overall payment status
+      const totalContributions = (equb.contributions || []).filter(c => c.userId === member.id).length;
+      const paymentStatusClass = isFullyPaid ? 'paid' : 'not-paid';
+      const paymentStatusText = isFullyPaid ? 'Up to date' : `${getText('missedDaysCount', missed, formatCurrency(totalOwed))}`;
+      
+      paymentStatus = `
+        <p>Payments made: ${totalContributions}</p>
+        <div class="payment-status ${paymentStatusClass}">${paymentStatusText}</div>
+      `;
+    }
     
     let html = `
       <p style="font-weight:600">
@@ -1539,31 +2612,9 @@ function updateMembers() {
       </p>
       <p>${getText('phone')}: ${escapeHtml(member.phone || '-')}</p>
       <p>${getText('editPayoutOrder')}: #${payoutOrderIndex + 1}</p>
+      ${paymentStatus}
+      <p>${getText('memberSince')}: ${new Date(member.joinedAt).toLocaleDateString()}</p>
     `;
-
-    // Enhanced payment status
-    if (equb.frequency === 'daily') {
-      const today = toDateOnlyString(new Date());
-      const paidToday = (equb.contributions || []).some(c => 
-        c.userId === member.id && toDateOnlyString(c.date) === today
-      );
-      
-      if (paidToday) {
-        html += `<div class="payment-status paid">${getText('paid')} today</div>`;
-      } else if (missed > 0) {
-        html += `<div class="payment-status not-paid">${getText('missedDaysCount', missed, formatCurrency(totalOwed))}</div>`;
-      } else {
-        html += `<div class="payment-status not-paid">${getText('notPaid')} today</div>`;
-      }
-    } else {
-      // For non-daily equbs, show overall payment status
-      const totalContributions = (equb.contributions || []).filter(c => c.userId === member.id).length;
-      html += `<p>Payments made: ${totalContributions}</p>`;
-      if (missed > 0) {
-        html += `<div class="payment-status not-paid">${getText('missedDaysCount', missed, formatCurrency(totalOwed))}</div>`;
-      }
-      html += `<p>${getText('memberSince')}: ${new Date(member.joinedAt).toLocaleDateString()}</p>`;
-    }
 
     card.innerHTML = html;
 
@@ -2158,327 +3209,9 @@ function importEqub(event) {
   reader.onerror = () => alert('Failed to read file');
   reader.readAsText(file);
 }
-
-/* ---------------------------------------------------------------------
-   PDF Export - Fixed Version
-   --------------------------------------------------------------------- */
-async function exportToPDF() {
-  const equb = getCurrentEqub();
-  if (!equb) return alert('No equb selected');
-
-  if (!window.jspdf) {
-    return alert('PDF library not loaded. Please check your internet connection.');
-  }
-
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF('p', 'mm', 'a4');
-
-  // Color scheme
-  const primaryColor = [56, 189, 248];
-  const secondaryColor = [139, 92, 246];
-  const successColor = [34, 197, 94];
-  const warningColor = [245, 158, 11];
-  const grayColor = [107, 114, 128];
-  
-  const margin = 20;
-  let y = margin;
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const contentWidth = pageWidth - (margin * 2);
-
-  // ===== HEADER WITH LOGO =====
-  doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-  doc.rect(0, 0, pageWidth, 45, 'F');
-  
-  // Enhanced logo handling with CORS fix
-  try {
-    const logoBase64 = await loadLogoAsBase64();
-    if (logoBase64) {
-      // Add logo image
-      doc.addImage(logoBase64, 'PNG', margin, 10, 25, 25);
-    } else {
-      // Fallback: Create simple logo - pass all required parameters
-      createFallbackLogo(doc, margin, equb, pageWidth);
-    }
-  } catch (e) {
-    console.log('Logo loading failed, using fallback:', e);
-    createFallbackLogo(doc, margin, equb, pageWidth);
-  }
-  
-  // Title
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(22);
-  doc.text('EQUB REPORT', pageWidth / 2, 20, { align: 'center' });
-  
-  // Equb name subtitle
-  doc.setFontSize(12);
-  doc.setFont('helvetica', 'normal');
-  doc.text(equb.name, pageWidth / 2, 30, { align: 'center' });
-
-  y = 55;
-
-  // Rest of the PDF content...
-  const totalContributions = equb.contributions.reduce((sum, c) => sum + (c.amount || 0), 0);
-  const remaining = Math.max(0, equb.goalAmount - totalContributions);
-  const progress = equb.goalAmount ? ((totalContributions / equb.goalAmount) * 100).toFixed(1) : '0.0';
-  
-  // Create summary boxes
-  let statusText = 'Active';
-  if (equb.status === 'forming') statusText = 'Forming';
-  if (equb.status === 'completed') statusText = 'Completed';
-  
-  const summaryData = [
-    { label: 'Goal Amount', value: `${formatCurrency(equb.goalAmount)} ETB`, color: primaryColor },
-    { label: 'Total Collected', value: `${formatCurrency(totalContributions)} ETB`, color: successColor },
-    { label: 'Remaining', value: `${formatCurrency(remaining)} ETB`, color: warningColor },
-    { label: 'Progress', value: `${progress}%`, color: secondaryColor },
-    { label: 'Members', value: `${equb.members.length}/${equb.targetMembers}`, color: grayColor },
-    { label: 'Status', value: statusText, color: equb.status === 'active' ? successColor : warningColor }
-  ];
-
-  // Draw summary cards in 2 columns
-  const cardWidth = (contentWidth - 10) / 2;
-  const cardHeight = 18;
-  
-  summaryData.forEach((item, index) => {
-    const row = Math.floor(index / 2);
-    const col = index % 2;
-    const x = margin + (col * (cardWidth + 10));
-    const cardY = y + (row * (cardHeight + 8));
-    
-    doc.setFillColor(item.color[0], item.color[1], item.color[2], 0.1);
-    doc.roundedRect(x, cardY, cardWidth, cardHeight, 3, 3, 'F');
-    
-    doc.setDrawColor(item.color[0], item.color[1], item.color[2], 0.3);
-    doc.setLineWidth(0.5);
-    doc.roundedRect(x, cardY, cardWidth, cardHeight, 3, 3);
-    
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
-    doc.setTextColor(grayColor[0], grayColor[1], grayColor[2]);
-    doc.text(item.label, x + 6, cardY + 6);
-    
-    doc.setFontSize(10);
-    doc.setTextColor(0, 0, 0);
-    doc.text(item.value, x + 6, cardY + 12);
-  });
-
-  y += (Math.ceil(summaryData.length / 2) * (cardHeight + 8)) + 20;
-
-  // Continue with the rest of your existing PDF content...
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-  doc.text('Equb Details', margin, y);
-  y += 8;
-
-  let frequencyText = 'Monthly';
-  if (equb.frequency === 'daily') frequencyText = 'Daily';
-  if (equb.frequency === 'weekly') frequencyText = 'Weekly';
-  if (equb.frequency === 'yearly') frequencyText = 'Yearly';
-  
-  const details = [
-    ['Frequency', frequencyText],
-    ['Contribution Amount', `${formatCurrency(equb.contributionAmount)} ETB`],
-    ['Start Date', new Date(equb.startDate).toLocaleDateString()],
-    ['Rounds Completed', String(equb.payoutHistory?.length || 0)],
-    ['Current Round', String((equb.payoutHistory?.length || 0) + 1)],
-    ['Equb Code', equb.code]
-  ];
-
-  doc.setFontSize(9);
-  doc.setDrawColor(200, 200, 200);
-  
-  details.forEach(([label, value], index) => {
-    if (y > doc.internal.pageSize.getHeight() - 25) {
-      doc.addPage();
-      y = margin;
-    }
-    
-    if (index % 2 === 0) {
-      doc.setFillColor(248, 250, 252);
-      doc.rect(margin, y, contentWidth, 7, 'F');
-    }
-    
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(grayColor[0], grayColor[1], grayColor[2]);
-    doc.text(label + ':', margin + 5, y + 5);
-    
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(0, 0, 0);
-    doc.text(String(value), margin + 45, y + 5);
-    
-    y += 7;
-  });
-
-  y += 12;
-
-  // Members table
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-  doc.text('Members Overview', margin, y);
-  y += 10;
-
-  const headers = ['#', 'Name', 'Phone', 'Status', 'Missed', 'Balance'];
-  const colWidths = [12, 45, 35, 25, 20, 28];
-  
-  doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-  doc.rect(margin, y, contentWidth, 8, 'F');
-  
-  let x = margin;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.setTextColor(255, 255, 255);
-  
-  headers.forEach((header, i) => {
-    doc.text(header, x + (colWidths[i] / 2), y + 5, { align: 'center' });
-    x += colWidths[i];
-  });
-
-  y += 8;
-
-  const today = toDateOnlyString(new Date());
-  const pageHeight = doc.internal.pageSize.getHeight();
-  
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(0, 0, 0);
-
-  equb.members.forEach((member, index) => {
-    if (y > pageHeight - 20) {
-      doc.addPage();
-      y = margin;
-      
-      doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-      doc.rect(margin, y, contentWidth, 8, 'F');
-      
-      x = margin;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8);
-      doc.setTextColor(255, 255, 255);
-      headers.forEach((header, i) => {
-        doc.text(header, x + (colWidths[i] / 2), y + 5, { align: 'center' });
-        x += colWidths[i];
-      });
-      y += 8;
-      doc.setFontSize(8);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(0, 0, 0);
-    }
-
-    if (index % 2 === 0) {
-      doc.setFillColor(248, 250, 252);
-      doc.rect(margin, y, contentWidth, 7, 'F');
-    }
-
-    const paid = equb.contributions.some(c => c.userId === member.id && toDateOnlyString(c.date) === today);
-    const missed = computeMemberMissedCycles(equb, member);
-    const balance = missed * equb.contributionAmount;
-    const isCreator = member.id === equb.creatorId;
-
-    x = margin;
-    
-    const rowData = [
-      String(index + 1),
-      member.name + (isCreator ? ' (Owner)' : ''),
-      member.phone || '-',
-      paid ? 'Paid' : 'Pending',
-      String(missed),
-      balance > 0 ? `-${formatCurrency(balance)}` : 'Clear'
-    ];
-
-    rowData.forEach((cell, colIndex) => {
-      const isNumeric = colIndex === 0 || colIndex === 4;
-      const align = isNumeric ? 'center' : 'left';
-      const padding = colIndex === 0 ? 6 : 3;
-      
-      if (colIndex === 3) {
-        doc.setTextColor(paid ? successColor[0] : warningColor[0], 
-                        paid ? successColor[1] : warningColor[1], 
-                        paid ? successColor[2] : warningColor[2]);
-      } else if (colIndex === 5 && balance > 0) {
-        doc.setTextColor(239, 68, 68);
-      } else {
-        doc.setTextColor(0, 0, 0);
-      }
-      
-      doc.text(String(cell), x + padding, y + 4, { align });
-      x += colWidths[colIndex];
-    });
-
-    doc.setTextColor(0, 0, 0);
-    y += 7;
-  });
-
-  // Footer
-  const footerY = doc.internal.pageSize.getHeight() - 12;
-  
-  doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2], 0.5);
-  doc.setLineWidth(0.3);
-  doc.line(margin, footerY - 8, pageWidth - margin, footerY - 8);
-
-  doc.setFont('helvetica', 'italic');
-  doc.setFontSize(7);
-  doc.setTextColor(grayColor[0], grayColor[1], grayColor[2]);
-  
-  const generatedBy = `Generated by: ${state.user?.name || 'Unknown User'}`;
-  const generatedDate = `Date: ${new Date().toLocaleDateString()}`;
-  
-  doc.text(generatedBy, margin, footerY - 3);
-  doc.text('Equb App © 2025', pageWidth / 2, footerY - 3, { align: 'center' });
-  doc.text(generatedDate, pageWidth - margin, footerY - 3, { align: 'right' });
-
-  const fileName = `Equb_${equb.name.replace(/[^\w\s]/gi, '_')}_Report_${toDateOnlyString(new Date())}.pdf`;
-  
-  setTimeout(() => {
-    doc.save(fileName);
-    success(getText('exportPDF'));
-  }, 100);
-}
-
-/* ---------------------------------------------------------------------
-   Fixed Helper Functions for PDF
-   --------------------------------------------------------------------- */
-function loadLogoAsBase64() {
-  return new Promise((resolve) => {
-    // Try to get the logo from the page first (from your HTML)
-    const existingLogo = document.querySelector('.welcome-logo');
-    if (existingLogo && existingLogo.src) {
-      // For same-origin images, try to convert to base64
-      if (isSameOrigin(existingLogo.src)) {
-        getBase64FromImage(existingLogo).then(resolve).catch(() => resolve(null));
-      } else {
-        // For cross-origin images, we can't convert to base64 due to CORS
-        // Just use the image URL directly (jsPDF can handle some external URLs)
-        resolve(existingLogo.src);
-      }
-      return;
-    }
-
-    // If no logo found, resolve with null to use fallback
-    resolve(null);
-  });
-}
-
-function isSameOrigin(url) {
-  try {
-    const imgUrl = new URL(url, window.location.href);
-    const currentUrl = new URL(window.location.href);
-    return imgUrl.origin === currentUrl.origin;
-  } catch {
-    return false;
-  }
-}
-
-function getBase64FromImage(img) {
+// Function to convert image to base64 for PDF
+function imageToBase64(img) {
   return new Promise((resolve, reject) => {
-    // Only proceed if image is from same origin
-    if (!isSameOrigin(img.src)) {
-      reject(new Error('Cross-origin image cannot be converted to base64'));
-      return;
-    }
-
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     canvas.width = img.width;
@@ -2494,25 +3227,471 @@ function getBase64FromImage(img) {
   });
 }
 
-function createFallbackLogo(doc, margin, equb, pageWidth) {
-  // FIXED: Now pageWidth is passed as a parameter
-  // Simple text-based logo
-  doc.setFillColor(255, 255, 255);
-  doc.circle(margin + 15, 22, 8, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(56, 189, 248);
-  doc.setFontSize(10);
-  doc.text('E', margin + 15, 24, { align: 'center' });
+/* ---------------------------------------------------------------------
+   PDF Export - Professional Clean Design
+   --------------------------------------------------------------------- */
+async function exportToPDF() {
+  const equb = getCurrentEqub();
+  if (!equb) return alert('No equb selected');
+
+  if (!window.jspdf) {
+    return alert('PDF library not loaded. Please check your internet connection.');
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF('p', 'mm', 'a4');
+
+  // Clean color scheme
+  const primaryColor = [59, 130, 246];
+  const secondaryColor = [139, 92, 246];
+  const successColor = [16, 185, 129];
+  const warningColor = [245, 158, 11];
+  const dangerColor = [239, 68, 68];
+  const textColor = [31, 41, 55];
+  const lightGray = [243, 244, 246];
+  const borderColor = [229, 231, 235];
   
-  // Title (already set in main function, but keep for consistency)
+  const margin = 15;
+  let y = margin;
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const contentWidth = pageWidth - (margin * 2);
+
+  // ===== ENHANCED HEADER WITH EMBEDDED LOGO =====
+  doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+  doc.rect(0, 0, pageWidth, 35, 'F');
+  
+  try {
+    // Try to use the logo from HTML first
+    const logoElement = document.querySelector('.welcome-logo');
+    
+    if (logoElement && logoElement.src && !logoElement.src.includes('data:')) {
+      console.log('Trying to use HTML logo:', logoElement.src);
+      
+      // Create a test image to check if we can load it
+      const testImg = new Image();
+      testImg.crossOrigin = 'Anonymous';
+      testImg.onload = function() {
+        try {
+          // Try to convert to base64
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          canvas.width = testImg.width;
+          canvas.height = testImg.height;
+          ctx.drawImage(testImg, 0, 0);
+          const logoData = canvas.toDataURL('image/png');
+          
+          // Add logo to PDF
+          doc.addImage(logoData, 'PNG', margin, 8, 20, 20);
+        } catch (e) {
+          console.log('Canvas conversion failed, using embedded logo');
+          addEmbeddedLogo(doc, margin);
+        }
+      };
+      
+      testImg.onerror = function() {
+        console.log('Image load failed, using embedded logo');
+        addEmbeddedLogo(doc, margin);
+      };
+      
+      testImg.src = logoElement.src;
+    } else {
+      // Use embedded logo
+      addEmbeddedLogo(doc, margin);
+    }
+    
+    // Title positioned next to logo
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.text('EQUB MANAGEMENT REPORT', margin + 25, 15);
+    
+    // Equb name subtitle
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(equb.name, margin + 25, 22);
+    
+    // Report type and date
+    doc.setFontSize(8);
+    doc.text(`Generated on ${new Date().toLocaleDateString()}`, margin + 25, 28);
+    
+  } catch (error) {
+    console.log('Logo loading failed:', error);
+    addEmbeddedLogo(doc, margin);
+    
+    // Still add the text
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.text('EQUB MANAGEMENT REPORT', margin + 25, 15);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(equb.name, margin + 25, 22);
+    doc.setFontSize(8);
+    doc.text(`Generated on ${new Date().toLocaleDateString()}`, margin + 25, 28);
+  }
+
+  y = 45;
+
+  // ===== EQUB BASIC INFORMATION SECTION =====
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+  doc.text('Equb Overview', margin, y);
+  
+  y += 8;
+
+  // Enhanced equb details in a clean table format
+  const equbDetails = [
+    ['Equb Name', equb.name],
+    ['Status', equb.status.charAt(0).toUpperCase() + equb.status.slice(1)],
+    ['Frequency', equb.frequency.charAt(0).toUpperCase() + equb.frequency.slice(1)],
+    ['Start Date', new Date(equb.startDate).toLocaleDateString()],
+    ['Equb Code', equb.code],
+    ['Created By', state.user?.name || 'Unknown']
+  ];
+
+  doc.setFontSize(9);
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  
+  equbDetails.forEach(([label, value], index) => {
+    if (y > doc.internal.pageSize.getHeight() - 25) {
+      doc.addPage();
+      y = margin;
+    }
+    
+    // Alternate row background
+    if (index % 2 === 0) {
+      doc.setFillColor(lightGray[0], lightGray[1], lightGray[2]);
+      doc.rect(margin, y, contentWidth, 7, 'F');
+    }
+    
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+    doc.text(label + ':', margin + 3, y + 5);
+    
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+    doc.text(String(value), margin + 40, y + 5);
+    
+    y += 7;
+  });
+
+  y += 12;
+
+  // ===== FINANCIAL SUMMARY SECTION =====
+  const totalContributions = equb.contributions.reduce((sum, c) => sum + (c.amount || 0), 0);
+  const remaining = Math.max(0, equb.goalAmount - totalContributions);
+  const progress = equb.goalAmount ? ((totalContributions / equb.goalAmount) * 100).toFixed(1) : '0.0';
+  const totalPayouts = equb.payoutHistory?.length || 0;
+  const totalDistributed = equb.payoutHistory?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+  
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+  doc.text('Financial Summary', margin, y);
+  y += 8;
+
+  // Financial metrics in 2-column layout
+  const financialData = [
+    { 
+      label: 'Goal Amount', 
+      value: `${formatCurrency(equb.goalAmount)} ETB`,
+      color: primaryColor
+    },
+    { 
+      label: 'Total Collected', 
+      value: `${formatCurrency(totalContributions)} ETB`,
+      color: successColor
+    },
+    { 
+      label: 'Remaining to Goal', 
+      value: `${formatCurrency(remaining)} ETB`,
+      color: remaining > 0 ? warningColor : successColor
+    },
+    { 
+      label: 'Progress', 
+      value: `${progress}%`,
+      color: progress >= 100 ? successColor : primaryColor
+    },
+    { 
+      label: 'Total Distributed', 
+      value: `${formatCurrency(totalDistributed)} ETB`,
+      color: secondaryColor
+    },
+    { 
+      label: 'Payouts Completed', 
+      value: `${totalPayouts}`,
+      color: textColor
+    }
+  ];
+
+  const cardWidth = (contentWidth - 10) / 2;
+  const cardHeight = 16;
+  
+  financialData.forEach((item, index) => {
+    const row = Math.floor(index / 2);
+    const col = index % 2;
+    const x = margin + (col * (cardWidth + 10));
+    const cardY = y + (row * (cardHeight + 8));
+    
+    // Clean card design
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(x, cardY, cardWidth, cardHeight, 2, 2, 'S');
+    
+    // Colored accent bar at top
+    doc.setFillColor(item.color[0], item.color[1], item.color[2]);
+    doc.rect(x, cardY, cardWidth, 3, 'F');
+    
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+    doc.text(item.label, x + 5, cardY + 8);
+    
+    doc.setFontSize(9);
+    doc.setTextColor(item.color[0], item.color[1], item.color[2]);
+    doc.text(item.value, x + 5, cardY + 13);
+  });
+
+  y += (Math.ceil(financialData.length / 2) * (cardHeight + 8)) + 15;
+
+  // ===== MEMBERS PERFORMANCE SECTION =====
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+  doc.text('Members Performance', margin, y);
+  y += 10;
+
+  const headers = ['Name', 'Phone', 'Status', 'Missed', 'Balance', 'Payouts'];
+  const colWidths = [40, 35, 22, 18, 25, 20];
+  
+  // Clean table header
+  doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+  doc.rect(margin, y, contentWidth, 7, 'F');
+  
+  let x = margin;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(22);
-  doc.text('EQUB REPORT', pageWidth / 2, 20, { align: 'center' });
   
-  doc.setFontSize(12);
+  headers.forEach((header, i) => {
+    doc.text(header, x + (colWidths[i] / 2), y + 4.5, { align: 'center' });
+    x += colWidths[i];
+  });
+
+  y += 7;
+
+  const today = toDateOnlyString(new Date());
+  const pageHeight = doc.internal.pageSize.getHeight();
+  
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
-  doc.text(equb.name, pageWidth / 2, 30, { align: 'center' });
+  doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+
+  equb.members.forEach((member, index) => {
+    if (y > pageHeight - 20) {
+      doc.addPage();
+      y = margin;
+      
+      // Repeat header on new page
+      doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.rect(margin, y, contentWidth, 7, 'F');
+      
+      x = margin;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(255, 255, 255);
+      headers.forEach((header, i) => {
+        doc.text(header, x + (colWidths[i] / 2), y + 4.5, { align: 'center' });
+        x += colWidths[i];
+      });
+      y += 7;
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+    }
+
+    // Alternate row background
+    if (index % 2 === 0) {
+      doc.setFillColor(lightGray[0], lightGray[1], lightGray[2]);
+      doc.rect(margin, y, contentWidth, 6, 'F');
+    }
+
+    const paidToday = equb.contributions.some(c => 
+      c.userId === member.id && toDateOnlyString(c.date) === today
+    );
+    const missed = computeMemberMissedCycles(equb, member);
+    const balance = missed * equb.contributionAmount;
+    const isCreator = member.id === equb.creatorId;
+    const payoutCount = equb.payoutHistory?.filter(p => p.recipientId === member.id).length || 0;
+
+    x = margin;
+    
+    const rowData = [
+      member.name + (isCreator ? ' (Owner)' : ''),
+      member.phone || '-',
+      paidToday ? 'Paid' : 'Pending',
+      String(missed),
+      balance > 0 ? `-${formatCurrency(balance)}` : 'Clear',
+      String(payoutCount)
+    ];
+
+    rowData.forEach((cell, colIndex) => {
+      const isNumeric = colIndex === 3 || colIndex === 5;
+      const align = isNumeric ? 'center' : 'left';
+      const padding = colIndex === 0 ? 3 : (isNumeric ? 0 : 3);
+      
+      // Color coding for status and balances
+      if (colIndex === 2) {
+        doc.setTextColor(
+          paidToday ? successColor[0] : warningColor[0], 
+          paidToday ? successColor[1] : warningColor[1], 
+          paidToday ? successColor[2] : warningColor[2]
+        );
+      } else if (colIndex === 4 && balance > 0) {
+        doc.setTextColor(dangerColor[0], dangerColor[1], dangerColor[2]);
+      } else {
+        doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+      }
+      
+      doc.text(String(cell), x + padding, y + 3.5, { align });
+      x += colWidths[colIndex];
+    });
+
+    doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+    y += 6;
+  });
+
+  y += 10;
+
+  // ===== PAYOUT HISTORY SECTION =====
+  if (equb.payoutHistory && equb.payoutHistory.length > 0) {
+    if (y > pageHeight - 40) {
+      doc.addPage();
+      y = margin;
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+    doc.text('Payout History', margin, y);
+    y += 8;
+
+    const payoutHeaders = ['Round', 'Recipient', 'Date', 'Amount'];
+    const payoutColWidths = [15, 55, 35, 35];
+    
+    doc.setFillColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+    doc.rect(margin, y, contentWidth, 6, 'F');
+    
+    x = margin;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(255, 255, 255);
+    
+    payoutHeaders.forEach((header, i) => {
+      doc.text(header, x + (payoutColWidths[i] / 2), y + 3.5, { align: 'center' });
+      x += payoutColWidths[i];
+    });
+
+    y += 6;
+
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+
+    equb.payoutHistory
+      .sort((a, b) => b.round - a.round)
+      .forEach((payout, index) => {
+        if (y > pageHeight - 15) {
+          doc.addPage();
+          y = margin;
+          
+          doc.setFillColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+          doc.rect(margin, y, contentWidth, 6, 'F');
+          
+          x = margin;
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(7);
+          doc.setTextColor(255, 255, 255);
+          payoutHeaders.forEach((header, i) => {
+            doc.text(header, x + (payoutColWidths[i] / 2), y + 3.5, { align: 'center' });
+            x += payoutColWidths[i];
+          });
+          y += 6;
+          doc.setFontSize(7);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+        }
+
+        if (index % 2 === 0) {
+          doc.setFillColor(lightGray[0], lightGray[1], lightGray[2]);
+          doc.rect(margin, y, contentWidth, 5, 'F');
+        }
+
+        x = margin;
+        const payoutData = [
+          String(payout.round),
+          payout.recipientName,
+          new Date(payout.date).toLocaleDateString(),
+          `${formatCurrency(payout.amount)} ETB`
+        ];
+
+        payoutData.forEach((cell, colIndex) => {
+          const align = colIndex === 0 ? 'center' : 'left';
+          doc.text(String(cell), x + 3, y + 3, { align });
+          x += payoutColWidths[colIndex];
+        });
+
+        y += 5;
+      });
+
+    y += 10;
+  }
+
+  // ===== PROFESSIONAL FOOTER =====
+  const footerY = doc.internal.pageSize.getHeight() - 10;
+  
+  doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+  doc.setLineWidth(0.3);
+  doc.line(margin, footerY - 8, pageWidth - margin, footerY - 8);
+
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(7);
+  doc.setTextColor(107, 114, 128);
+  
+  const generatedBy = `Generated by: ${state.user?.name || 'Unknown User'}`;
+  const generatedDate = `Date: ${new Date().toLocaleDateString()}`;
+  const pageNumber = `Page: ${doc.internal.getNumberOfPages()}`;
+  
+  doc.text(generatedBy, margin, footerY - 3);
+  doc.text('Equb Management System © 2025', pageWidth / 2, footerY - 3, { align: 'center' });
+  doc.text(`${generatedDate} | ${pageNumber}`, pageWidth - margin, footerY - 3, { align: 'right' });
+
+  // ===== SAVE PDF =====
+  const fileName = `Equb_${equb.name.replace(/[^\w\s]/gi, '_')}_Report_${toDateOnlyString(new Date())}.pdf`;
+  
+  setTimeout(() => {
+    doc.save(fileName);
+    success(getText('exportPDF'));
+  }, 100);
+}
+
+
+function addEmbeddedLogo(doc, margin) {
+  try {
+    // Try this raw URL (main branch)
+    const logoUrl = 'https://raw.githubusercontent.com/tadesseAmenu/Equb/main/logo.png';
+    
+    // Add your GitHub hosted logo to PDF
+    doc.addImage(logoUrl, 'PNG', margin, 8, 20 , 20);
+    
+    console.log('Your GitHub logo loaded successfully!');
+    
+  } catch (error) {
+    console.log('GitHub logo failed, using fallback:', error);
+    createEqubFallbackLogo(doc, margin);
+  }
 }
 
 /* ---------------------------------------------------------------------
