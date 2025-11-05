@@ -77,6 +77,11 @@
             <div class="progress-remaining" id="progress-remaining"></div>
           </div>
         </div>
+           <!-- Payment Gating Notice -->
+        <div id="payment-notice" class="payment-notice" style="display: none;">
+          <span data-key="completeProgress">Complete 100% progress to enable payments</span>
+        </div>
+
               <!-- Payment Status for All Frequencies -->
       <div id="payment-status-section" class="glass-card" style="margin-top: 20px;">
         <h2 id="payment-period-title">Payment Status</h2>
@@ -86,25 +91,12 @@
         </div>
       </div>
 
-        <!-- Payment Gating Notice -->
-        <div id="payment-notice" class="payment-notice" style="display: none;">
-          <span data-key="completeProgress">Complete 100% progress to enable payments</span>
-        </div>
-
         <span id="status"></span>
         <p><span data-key="round">Round:</span> <span id="current-round"></span> <span data-key="of">of</span> <span id="total-rounds"></span></p>
       </div>
 
-      <!-- Today's payments -->
-      <div id="daily-payments" class="info-section" style="display:none;">
-        <div class="glass-card">
-          <h2>
-            <span data-key="todayPayments">Today's Payments</span>
-            (<span id="current-date"></span>)
-          </h2>
-          <div id="payments-list" class="payments-vertical-list" aria-live="polite"></div>
-        </div>
-      </div>
+     
+     
 
       <div class="action-buttons" role="group" aria-label="Home actions">
         <button class="gradient-button" type="button" onclick="showModal('contribute')" id="contribute-button">
